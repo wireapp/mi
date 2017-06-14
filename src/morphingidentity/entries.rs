@@ -1,5 +1,5 @@
 use sodiumoxide::crypto::sign;
-use sodiumoxide::crypto::hash::sha256::{hash, Digest, DIGESTBYTES};
+use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, SIGNATUREBYTES};
 use cbor::Encoder;
 use ledger::FullLedger;
@@ -16,7 +16,7 @@ pub enum EntryType {
 pub enum CapType {
     AddCap = 0b01u32,
     RemoveCap = 0b10u32,
-    RemovableCap = 0b100u32,
+    NonRemovableCap = 0b100u32,
 }
 #[repr(u32)]
 pub enum DeviceType {
@@ -105,12 +105,7 @@ impl LedgerEntry {
         hash(e.as_bytes())
     }
     pub fn advanced_hash(&self) -> Digest {
-        let mut e = self.encode_signed_entry();
-        let h: Digest = hash(e.as_bytes());
-        let mut v: Vec<u8> = Vec::with_capacity(2 * DIGESTBYTES);
-        v.extend_from_slice(self.history_hash.as_ref());
-        v.extend_from_slice(h.as_ref());
-        hash(v.as_slice())
+        self.complete_hash()
     }
     pub fn verify_subject_signature(&self) -> bool {
         sign::verify_detached(&self.subject_signature,
@@ -122,11 +117,14 @@ impl LedgerEntry {
                               self.partial_hash().as_ref(),
                               &self.issuer_publickey)
     }
-    pub fn capability_can_add(capability: u32) -> bool {
-        (capability & CapType::AddCap as u32) > 0
+    pub fn capability_can_add(&self) -> bool {
+        (self.capabilities & CapType::AddCap as u32) > 0
     }
-    pub fn capability_can_remove(capability: u32) -> bool {
-        (capability & CapType::RemoveCap as u32) > 0
+    pub fn capability_can_remove(&self) -> bool {
+        (self.capabilities & CapType::RemoveCap as u32) > 0
+    }
+    pub fn capability_cannot_be_removed(&self) -> bool {
+        (self.capabilities & CapType::NonRemovableCap as u32) > 0
     }
 }
 
@@ -160,12 +158,4 @@ impl EntryExtension {
             permanent_subject_publickeys: permanent_devices,
         }
     }
-}
-
-pub struct TemporaryEntry {
-    pub format_version: u32,
-    pub reference_version: u32,
-    pub issuer_publickey: sign::PublicKey,
-    pub subject_publickey: sign::PublicKey,
-    pub issuer_signature: Signature,
 }

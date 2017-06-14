@@ -4,9 +4,6 @@ extern crate cbor;
 
 extern crate morphingidentity;
 
-use cbor::{Decoder, Encoder};
-use rustc_serialize::json::ToJson;
-
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash;
 use sodiumoxide::randombytes::randombytes;
@@ -41,25 +38,6 @@ macro_rules! random_u32 {
 #[allow(dead_code)]
 fn main() {
     init();
-
-    let data1 = vec![1, 2, 3];
-    let data2 = vec![4, 5, 6];
-
-    let mut e = Encoder::from_memory();
-    e.encode(&data1).unwrap();
-    e.encode(&data2).unwrap();
-
-    let mut d = Decoder::from_bytes(e.as_bytes());
-    // let items: Vec<u8> = d.decode().collect::<Result<_, _>>().unwrap();
-
-    // assert_eq!(items, data);
-
-    let cbordata = d.items().next().unwrap().unwrap();
-    let jsondata = cbordata.to_json();
-
-    println!("Hex: {}", morphingidentity::utils::fmt_hex(&e.as_bytes()));
-
-    println!("JSON: {}", jsondata);
 
     // Example
     let mut le: LedgerEntry = LedgerEntry::new(1,
@@ -188,13 +166,14 @@ fn main() {
                  l.count);
     }
 
-    // -------------- Random ledger
-    // Building a long ledger with random entries
+    // -------------- Fuzzing
+    // Building a long ledger with random entries to do some fuzzing
 
     println!("-------- Random ledger ---------");
+    println!("Generating {} entries", ITER);
 
     const DEVICES: usize = 8;
-    const ITER: u32 = 10000;
+    const ITER: u32 = 1000;
 
     let mut sec_keys = Vec::new();
     let mut pub_keys = Vec::new();
@@ -207,7 +186,7 @@ fn main() {
 
     let mut rl = FullLedger::new(random_u32!(), &pub_keys[0], &sec_keys[0]).unwrap();
 
-    for _i in 0..ITER {
+    for _i in 0..ITER - 1 {
         let trusted = rl.get_trusted_devices().clone();
         let mut issuer;
         let mut counter;
@@ -238,6 +217,7 @@ fn main() {
             c = random_usize!() % DEVICES;
             sub_sk = &sec_keys[c];
             sub_pk = &pub_keys[c];
+
             if trusted.contains_key(sub_pk) {
                 operation = EntryType::Remove;
             } else {
@@ -263,6 +243,7 @@ fn main() {
                 if new_entry.operation == EntryType::Add {
                     rl.sign_entry_as_subject(&mut new_entry, sub_sk);
                 }
+                assert!(rl.test_entry(&new_entry));
                 assert!(rl.add_entry(new_entry));
             }
         }

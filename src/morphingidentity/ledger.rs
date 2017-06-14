@@ -89,11 +89,20 @@ impl FullLedger {
             return self.trusted_devices.contains_key(&le.issuer_publickey) &&
                    le.verify_issuer_signature() &&
                    le.verify_subject_signature() &&
-                   !self.trusted_devices.contains_key(&le.subject_publickey);
+                   !self.trusted_devices.contains_key(&le.subject_publickey) &&
+                   self.get_trusted_device(&le.issuer_publickey)
+                .unwrap()
+                .capability_can_add();
         } else if le.operation == EntryType::Remove {
             return self.trusted_devices.contains_key(&le.issuer_publickey) &&
                    le.verify_issuer_signature() &&
-                   self.trusted_devices.contains_key(&le.subject_publickey);
+                   self.trusted_devices.contains_key(&le.subject_publickey) &&
+                   self.get_trusted_device(&le.issuer_publickey)
+                .unwrap()
+                .capability_can_remove() &&
+                   !self.get_trusted_device(&le.subject_publickey)
+                .unwrap()
+                .capability_cannot_be_removed();
         }
         false
     }
@@ -129,7 +138,6 @@ impl FullLedger {
         }
         trusted_devices.insert(first_entry.issuer_publickey.clone(), first_entry.clone());
         if self.entries.len() == 1 {
-            println!("check_ledger: only 1 device in ledger");
             self.trusted_devices = trusted_devices;
             return true;
         }
@@ -160,7 +168,10 @@ impl FullLedger {
                 if trusted_devices.contains_key(&le.issuer_publickey) &&
                    le.verify_issuer_signature() &&
                    le.verify_subject_signature() &&
-                   !trusted_devices.contains_key(&le.subject_publickey) {
+                   !trusted_devices.contains_key(&le.subject_publickey) &&
+                   trusted_devices.get(&le.issuer_publickey)
+                    .unwrap()
+                    .capability_can_add() {
                     trusted_devices.insert(le.subject_publickey.clone(), le.clone());
                 } else {
                     println!("check_ledger: Entry of type 'Add' error");
@@ -181,7 +192,13 @@ impl FullLedger {
             } else if le.operation == EntryType::Remove {
                 if trusted_devices.contains_key(&le.issuer_publickey) &&
                    le.verify_issuer_signature() &&
-                   trusted_devices.contains_key(&le.subject_publickey) {
+                   trusted_devices.contains_key(&le.subject_publickey) &&
+                   trusted_devices.get(&le.issuer_publickey)
+                    .unwrap()
+                    .capability_can_remove() &&
+                   !trusted_devices.get(&le.subject_publickey)
+                    .unwrap()
+                    .capability_cannot_be_removed() {
                     trusted_devices.remove(&le.subject_publickey);
                 } else {
                     println!("check_ledger: Entry of type 'Remove' error");
@@ -189,7 +206,7 @@ impl FullLedger {
                 }
             }
         }
-        println!("check_ledger: Found {} valid entries",
+        println!("check_ledger: Found {} trusted devices:",
                  trusted_devices.len());
         for (pk, l) in &trusted_devices {
             println!("check_ledger: Subject PublicKey: {}, Issuer PublicKey {}, count {}",
@@ -199,6 +216,9 @@ impl FullLedger {
         }
         self.trusted_devices = trusted_devices;
         true
+    }
+    pub fn get_trusted_device(&self, device: &PublicKey) -> Option<&LedgerEntry> {
+        self.trusted_devices.get(device)
     }
     pub fn get_trusted_devices(&self) -> HashMap<PublicKey, LedgerEntry> {
         self.trusted_devices.clone()
