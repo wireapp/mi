@@ -8,9 +8,16 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash;
 use sodiumoxide::randombytes::randombytes;
 
-// use morphingidentity::ledger::Ledger;
 use morphingidentity::entries::{EntryType, LedgerEntry, DeviceType};
 use morphingidentity::ledger::FullLedger;
+
+use cbor::{Config, Decoder, Encoder};
+use std::io::Cursor;
+use rustc_serialize::hex::FromHex;
+
+use morphingidentity::utils::fmt_hex;
+
+// use std::result::{Ok, Err};
 
 const MAX_DEVICES: usize = 8;
 
@@ -39,7 +46,47 @@ macro_rules! random_u32 {
 fn main() {
     init();
 
-    // Example
+    let a: u8 = 8;
+    let aa: u32 = 200000;
+
+    let h = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".from_hex().unwrap();
+
+    let mut e = Encoder::new(Cursor::new(Vec::new()));
+    e.bytes(&h).unwrap();
+    e.u8(a).unwrap();
+    e.u32(aa).unwrap();
+
+    let cbor_buf = e.into_writer().into_inner();
+
+    println!("Encoded value: {}", fmt_hex(&cbor_buf));
+
+    let mut d = Decoder::new(Config::default(), Cursor::new(cbor_buf));
+
+    let b_h = d.bytes().ok().unwrap();
+    // {
+    // Ok( => n,
+    // Err(_) => 0,
+    // };
+    //
+
+    println!("Decoded value: {}", fmt_hex(&b_h));
+
+    let b = match d.u8() {
+        Ok(n) => n,
+        Err(_) => 0,
+    };
+
+    println!("Decoded value: {}", b);
+
+    let bb = match d.u32() {
+        Ok(n) => n,
+        Err(_) => 0,
+    };
+
+    println!("Decoded value: {}", bb);
+
+
+    // Some tests
     let mut le: LedgerEntry = LedgerEntry::new(1,
                                                1,
                                                hash::sha256::hash(&[]),
@@ -58,6 +105,21 @@ fn main() {
     assert!(le.add_issuer_signature(&issuer_sk));
     assert!(le.add_subject_signature(&subject_sk));
 
+    let encoded = le.encode_as_cbor();
+
+    let decoded = LedgerEntry::new_from_cbor(encoded.clone()).unwrap();
+
+
+    let dec = decoded.clone();
+    let reenc = dec.encode_as_cbor();
+
+    let invalid_entry = le.clone();
+
+    assert_eq!(encoded, reenc);
+
+    println!("Length of ledger entry: {}", encoded.len());
+
+
     // ---------------   Example usage
 
     // Create a new ledger with ledger ID 1000 and a first entry
@@ -67,7 +129,7 @@ fn main() {
     assert!(full_ledger.check_ledger());
 
     // Test if a random entry can be added to the ledger
-    assert!(!full_ledger.test_entry(&le));
+    assert!(!full_ledger.test_entry(&invalid_entry));
 
     // Get the ledger version (number of entries in the ledger)
     assert_eq!(full_ledger.get_ledger_version(), 0);

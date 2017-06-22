@@ -1,16 +1,29 @@
 use sodiumoxide::crypto::sign;
-use sodiumoxide::crypto::hash::sha256::{hash, Digest};
-use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, SIGNATUREBYTES};
-use cbor::Encoder;
+use sodiumoxide::crypto::hash::sha256::{hash, Digest, DIGESTBYTES};
+use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, SIGNATUREBYTES,
+                                         PUBLICKEYBYTES};
+use cbor::{Config, Decoder, Encoder, DecodeResult};
+use std::io::Cursor;
 use ledger::FullLedger;
+
+use utils::{to_u8_32, to_u8_64};
 
 const FORMAT_VERSION: u32 = 1;
 
 #[derive(PartialEq, Clone)]
-#[repr(u8)]
+#[repr(u32)]
 pub enum EntryType {
     Add = 1,
     Remove = 0,
+}
+impl EntryType {
+    pub fn from_integer(x: u32) -> EntryType {
+        match x {
+            x if x == EntryType::Add as u32 => EntryType::Add,
+            x if x == EntryType::Remove as u32 => EntryType::Remove,
+            _ => EntryType::Remove,
+        }
+    }
 }
 #[repr(u32)]
 pub enum CapType {
@@ -25,6 +38,7 @@ pub enum DeviceType {
 }
 
 #[derive(Clone)]
+#[derive(PartialEq)]
 pub struct LedgerEntry {
     pub format_version: u32, // version of the data format of an entry
     pub ledger_id: u32, // version of the current ledger ID
@@ -78,35 +92,6 @@ impl LedgerEntry {
         self.issuer_signature = sign::sign_detached(&self.partial_hash()[..], &key);
         self.verify_issuer_signature()
     }
-    pub fn encode_unsigned_entry(&self) -> Encoder<Vec<u8>> {
-        let mut e = Encoder::from_memory();
-        e.encode(&[self.format_version, self.ledger_id]).unwrap();
-        e.encode(&self.history_hash[..]).unwrap();
-        e.encode(&self.extension_hash[..]).unwrap();
-        e.encode(&[self.count]).unwrap();
-        e.encode(&[self.operation.clone() as u8]).unwrap();
-        e.encode(&[self.capabilities.clone() as u32]).unwrap();
-        e.encode(&self.issuer_publickey[..]).unwrap();
-        e.encode(&self.subject_publickey[..]).unwrap();
-        e
-    }
-    pub fn encode_signed_entry(&self) -> Encoder<Vec<u8>> {
-        let mut e = self.encode_unsigned_entry();
-        e.encode(&self.issuer_signature[..]).unwrap();
-        e.encode(&self.subject_signature[..]).unwrap();
-        e
-    }
-    pub fn partial_hash(&self) -> Digest {
-        let mut e = self.encode_unsigned_entry();
-        hash(e.as_bytes())
-    }
-    pub fn complete_hash(&self) -> Digest {
-        let mut e = self.encode_signed_entry();
-        hash(e.as_bytes())
-    }
-    pub fn advanced_hash(&self) -> Digest {
-        self.complete_hash()
-    }
     pub fn verify_subject_signature(&self) -> bool {
         sign::verify_detached(&self.subject_signature,
                               self.partial_hash().as_ref(),
@@ -126,24 +111,73 @@ impl LedgerEntry {
     pub fn capability_cannot_be_removed(&self) -> bool {
         (self.capabilities & CapType::NonRemovableCap as u32) > 0
     }
+    pub fn encode_unsigned_entry(&self) -> Encoder<Cursor<Vec<u8>>> {
+        let mut e = Encoder::new(Cursor::new(Vec::new()));
+        e.u32(self.format_version).unwrap();
+        e.u32(self.ledger_id).unwrap();
+        e.bytes(&self.history_hash[..]).unwrap();
+        e.bytes(&self.extension_hash[..]).unwrap();
+        e.u32(self.count).unwrap();
+        e.u32(self.operation.clone() as u32).unwrap();
+        e.u32(self.capabilities.clone() as u32).unwrap();
+        e.bytes(&self.subject_publickey[..]).unwrap();
+        e.bytes(&self.issuer_publickey[..]).unwrap();
+        e
+    }
+    pub fn encode_signed_entry(&self) -> Encoder<Cursor<Vec<u8>>> {
+        let mut e = self.encode_unsigned_entry();
+        e.bytes(&self.subject_signature[..]).unwrap();
+        e.bytes(&self.issuer_signature[..]).unwrap();
+        e
+    }
+    pub fn partial_hash(&self) -> Digest {
+        let e = self.encode_unsigned_entry();
+        hash(&e.into_writer().into_inner())
+    }
+    pub fn complete_hash(&self) -> Digest {
+        let e = self.encode_signed_entry();
+        hash(&e.into_writer().into_inner())
+    }
+    pub fn advanced_hash(&self) -> Digest {
+        self.complete_hash()
+    }
+    pub fn encode_as_cbor(&self) -> Vec<u8> {
+        self.encode_signed_entry().into_writer().into_inner()
+    }
+    pub fn new_from_cbor(bytes: Vec<u8>) -> DecodeResult<LedgerEntry> {
+        let mut d = Decoder::new(Config::default(), Cursor::new(&bytes[..]));
+        Ok(LedgerEntry {
+            format_version: d.u32()?,
+            ledger_id: d.u32()?,
+            history_hash: Digest(to_u8_32(&d.bytes()?[0..DIGESTBYTES]).unwrap()),
+            extension_hash: Digest(to_u8_32(&d.bytes()?[0..DIGESTBYTES]).unwrap()),
+            count: d.u32()?,
+            operation: EntryType::from_integer(d.u32()?),
+            capabilities: d.u32()?,
+            subject_publickey: PublicKey(to_u8_32(&d.bytes()?[0..PUBLICKEYBYTES]).unwrap()),
+            issuer_publickey: PublicKey(to_u8_32(&d.bytes()?[0..PUBLICKEYBYTES]).unwrap()),
+            subject_signature: Signature(to_u8_64(&d.bytes()?[0..SIGNATUREBYTES]).unwrap()),
+            issuer_signature: Signature(to_u8_64(&d.bytes()?[0..SIGNATUREBYTES]).unwrap()),
+        })
+    }
 }
 
 pub struct EntryExtension {
     pub format_version: u32,
-    pub permanent_count: u8,
+    pub permanent_count: u32,
     pub permanent_subject_publickeys: Vec<PublicKey>,
 }
 
 impl EntryExtension {
     pub fn get_hash(&mut self) -> Digest {
         self.permanent_subject_publickeys.sort();
-        let mut e = Encoder::from_memory();
-        e.encode(&[self.format_version]).unwrap();
-        e.encode(&[self.permanent_count]).unwrap();
+        let mut e = Encoder::new(Cursor::new(Vec::new()));
+        e.u32(self.format_version).unwrap();
+        e.u32(self.permanent_count).unwrap();
         for i in 0..self.permanent_subject_publickeys.len() {
-            e.encode(&self.permanent_subject_publickeys[i][..]).unwrap();
+            e.bytes(&self.permanent_subject_publickeys[i][..]).unwrap();
         }
-        hash(e.as_bytes())
+        hash(&e.into_writer().into_inner())
     }
     pub fn create_extension(&self, ledger: &FullLedger) -> EntryExtension {
         let trusted_devices = ledger.get_trusted_devices();
@@ -154,7 +188,7 @@ impl EntryExtension {
         permanent_devices.sort();
         EntryExtension {
             format_version: FORMAT_VERSION,
-            permanent_count: permanent_devices.len() as u8,
+            permanent_count: permanent_devices.len() as u32,
             permanent_subject_publickeys: permanent_devices,
         }
     }
