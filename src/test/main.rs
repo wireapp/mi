@@ -8,8 +8,8 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash;
 use sodiumoxide::randombytes::randombytes;
 
-use morphingidentity::entries::{EntryType, LedgerEntry, DeviceType};
-use morphingidentity::ledger::FullLedger;
+use morphingidentity::entries::{EntryType, JournalEntry, DeviceType};
+use morphingidentity::journal::FullJournal;
 
 use cbor::{Config, Decoder, Encoder};
 use std::io::Cursor;
@@ -46,100 +46,60 @@ macro_rules! random_u32 {
 fn main() {
     init();
 
-    let a: u8 = 8;
-    let aa: u32 = 200000;
-
-    let h = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".from_hex().unwrap();
-
-    let mut e = Encoder::new(Cursor::new(Vec::new()));
-    e.bytes(&h).unwrap();
-    e.u8(a).unwrap();
-    e.u32(aa).unwrap();
-
-    let cbor_buf = e.into_writer().into_inner();
-
-    println!("Encoded value: {}", fmt_hex(&cbor_buf));
-
-    let mut d = Decoder::new(Config::default(), Cursor::new(cbor_buf));
-
-    let b_h = d.bytes().ok().unwrap();
-    // {
-    // Ok( => n,
-    // Err(_) => 0,
-    // };
-    //
-
-    println!("Decoded value: {}", fmt_hex(&b_h));
-
-    let b = match d.u8() {
-        Ok(n) => n,
-        Err(_) => 0,
-    };
-
-    println!("Decoded value: {}", b);
-
-    let bb = match d.u32() {
-        Ok(n) => n,
-        Err(_) => 0,
-    };
-
-    println!("Decoded value: {}", bb);
-
-
     // Some tests
-    let mut le: LedgerEntry = LedgerEntry::new(1,
-                                               1,
-                                               hash::sha256::hash(&[]),
-                                               0,
-                                               EntryType::Add,
-                                               DeviceType::PermanentDevice);
-    assert_eq!(morphingidentity::utils::fmt_hex(&le.history_hash[..]),
+    let mut je: JournalEntry = JournalEntry::new(1,
+                                                 1,
+                                                 hash::sha256::hash(&[]),
+                                                 0,
+                                                 EntryType::Add,
+                                                 DeviceType::PermanentDevice);
+    assert_eq!(morphingidentity::utils::fmt_hex(&je.history_hash[..]),
                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
     let (issuer_pk, issuer_sk) = sign::gen_keypair();
     let (subject_pk, subject_sk) = sign::gen_keypair();
 
-    le.issuer_publickey = issuer_pk;
-    le.subject_publickey = subject_pk;
+    je.issuer_publickey = issuer_pk;
+    je.subject_publickey = subject_pk;
 
-    assert!(le.add_issuer_signature(&issuer_sk));
-    assert!(le.add_subject_signature(&subject_sk));
+    assert!(je.add_issuer_signature(&issuer_sk));
+    assert!(je.add_subject_signature(&subject_sk));
 
-    let encoded = le.encode_as_cbor();
+    let encoded = je.encode_as_cbor();
 
-    let decoded = LedgerEntry::new_from_cbor(encoded.clone()).unwrap();
+    let decoded = JournalEntry::new_from_cbor(encoded.clone()).unwrap();
 
 
     let dec = decoded.clone();
     let reenc = dec.encode_as_cbor();
 
-    let invalid_entry = le.clone();
+    let invalid_entry = je.clone();
 
     assert_eq!(encoded, reenc);
 
-    println!("Length of ledger entry: {}", encoded.len());
+    println!("Length of journal entry: {}", encoded.len());
 
 
     // ---------------   Example usage
 
-    // Create a new ledger with ledger ID 1000 and a first entry
-    let mut full_ledger = FullLedger::new(1000, &issuer_pk, &issuer_sk).unwrap();
+    // Create a new journal with journal ID 1000 and a first entry
+    let mut full_journal = FullJournal::new(1000, &issuer_pk, &issuer_sk).unwrap();
 
-    // Check if the ledger is valid
-    assert!(full_ledger.check_ledger());
+    // Check if the journal is valid
+    assert!(full_journal.check_journal());
 
-    // Test if a random entry can be added to the ledger
-    assert!(!full_ledger.test_entry(&invalid_entry));
+    // Test if a random entry can be added to the journal
+    assert!(!full_journal.test_entry(&invalid_entry));
 
-    // Get the ledger version (number of entries in the ledger)
-    assert_eq!(full_ledger.get_ledger_version(), 0);
+    // Get the journal version (number of entries in the journal)
+    assert_eq!(full_journal.get_journal_version(), 0);
 
-    // Get the history hash of the ledger
-    println!("Ledger history hash: {}",
-             morphingidentity::utils::fmt_hex(&full_ledger.get_ledger_hash()[..]));
+    // Get the history hash of the journal
+    println!("Journal history hash: {}",
+             morphingidentity::utils::fmt_hex(&full_journal.get_journal_hash()[..]));
 
     // Prepare a new entry by adding a device
-    let mut second_entry = full_ledger.create_entry(EntryType::Add,
+    let mut second_entry = full_journal.create_entry(EntryType::Add,
                       DeviceType::PermanentDevice,
                       &issuer_pk,
                       &issuer_sk,
@@ -147,48 +107,48 @@ fn main() {
         .unwrap();
 
     // Test some properties of the new entry
-    assert_eq!(second_entry.ledger_id, 1000);
+    assert_eq!(second_entry.journal_id, 1000);
     assert_eq!(second_entry.count, 1);
 
-    // Test if the new entry can be added to the ledger
+    // Test if the new entry can be added to the journal
     // (the subject's signature is missing at this point)
-    assert!(!full_ledger.test_entry(&second_entry));
+    assert!(!full_journal.test_entry(&second_entry));
 
     // Have the subject sign the new entry (only needed when adding a device)
-    assert!(full_ledger.sign_entry_as_subject(&mut second_entry, &subject_sk));
+    assert!(full_journal.sign_entry_as_subject(&mut second_entry, &subject_sk));
 
     // Testing again now that the signature is there
-    assert!(full_ledger.test_entry(&second_entry));
+    assert!(full_journal.test_entry(&second_entry));
 
-    // Adding the new entry to the ledger
-    assert!(full_ledger.add_entry(second_entry.clone()));
+    // Adding the new entry to the journal
+    assert!(full_journal.add_entry(second_entry.clone()));
 
-    // Testing if the ledger is still valid after that
-    assert!(full_ledger.check_ledger());
+    // Testing if the journal is still valid after that
+    assert!(full_journal.check_journal());
 
     // Testing if the new device is now trusted
-    assert!(full_ledger.is_device_trusted(&subject_pk));
+    assert!(full_journal.is_device_trusted(&subject_pk));
 
-    // Checking that the ledger version has been incremented
-    assert_eq!(full_ledger.get_ledger_version(), 1);
+    // Checking that the journal version has been incremented
+    assert_eq!(full_journal.get_journal_version(), 1);
 
     // The hash should also have changed now
-    println!("Ledger hash: {}",
-             morphingidentity::utils::fmt_hex(&full_ledger.get_ledger_hash()[..]));
+    println!("Journal hash: {}",
+             morphingidentity::utils::fmt_hex(&full_journal.get_journal_hash()[..]));
 
     // Adding the same entry again shouldn't work
-    assert!(!full_ledger.add_entry(second_entry));
+    assert!(!full_journal.add_entry(second_entry));
 
-    // Display all trusted devices in the ledger
-    for (pk, l) in full_ledger.get_trusted_devices() {
+    // Display all trusted devices in the journal
+    for (pk, j) in full_journal.get_trusted_devices() {
         println!("Subject PublicKey: {}, Issuer PublicKey {}, count {}",
                  morphingidentity::utils::fmt_hex(&pk[..]),
-                 morphingidentity::utils::fmt_hex(&l.issuer_publickey[..]),
-                 l.count);
+                 morphingidentity::utils::fmt_hex(&j.issuer_publickey[..]),
+                 j.count);
     }
 
     // Preparing a new entry to remove the second device
-    let mut third_entry = full_ledger.create_entry(EntryType::Remove,
+    let mut third_entry = full_journal.create_entry(EntryType::Remove,
                       DeviceType::PermanentDevice,
                       &issuer_pk,
                       &issuer_sk,
@@ -198,40 +158,40 @@ fn main() {
     // Checking count is correct
     assert_eq!(third_entry.count, 2);
 
-    // Checking the new entry can be added to the ledger
-    assert!(full_ledger.test_entry(&third_entry));
+    // Checking the new entry can be added to the journal
+    assert!(full_journal.test_entry(&third_entry));
 
     // Signing an entry of type 'Remove' as the subject makes no sense
-    assert!(!full_ledger.sign_entry_as_subject(&mut third_entry, &subject_sk));
+    assert!(!full_journal.sign_entry_as_subject(&mut third_entry, &subject_sk));
 
-    // Add the third entry to the ledger
-    assert!(full_ledger.add_entry(third_entry.clone()));
+    // Add the third entry to the journal
+    assert!(full_journal.add_entry(third_entry.clone()));
 
-    // Check if the ledger is still valid after that
-    assert!(full_ledger.check_ledger());
+    // Check if the journal is still valid after that
+    assert!(full_journal.check_journal());
 
-    // The ledger hash should have changed
-    println!("Ledger hash: {}",
-             morphingidentity::utils::fmt_hex(&full_ledger.get_ledger_hash()[..]));
+    // The journal hash should have changed
+    println!("Journal hash: {}",
+             morphingidentity::utils::fmt_hex(&full_journal.get_journal_hash()[..]));
 
     // Adding the third entry again shouldn't work
-    assert!(!full_ledger.add_entry(third_entry));
+    assert!(!full_journal.add_entry(third_entry));
 
     // Checking if the second device is not trusted anymore
-    assert!(!full_ledger.is_device_trusted(&subject_pk));
+    assert!(!full_journal.is_device_trusted(&subject_pk));
 
     // Display the list of trusted devices
-    for (pk, l) in full_ledger.get_trusted_devices() {
+    for (pk, j) in full_journal.get_trusted_devices() {
         println!("Subject PublicKey: {}, Issuer PublicKey {}, count {}",
                  morphingidentity::utils::fmt_hex(&pk[..]),
-                 morphingidentity::utils::fmt_hex(&l.issuer_publickey[..]),
-                 l.count);
+                 morphingidentity::utils::fmt_hex(&j.issuer_publickey[..]),
+                 j.count);
     }
 
     // -------------- Fuzzing
-    // Building a long ledger with random entries to do some fuzzing
+    // Building a long journal with random entries to do some fuzzing
 
-    println!("-------- Random ledger ---------");
+    println!("-------- Random journal ---------");
     println!("Generating {} entries", ITER);
 
     const DEVICES: usize = 8;
@@ -246,7 +206,7 @@ fn main() {
         pub_keys.push(p_key);
     }
 
-    let mut rl = FullLedger::new(random_u32!(), &pub_keys[0], &sec_keys[0]).unwrap();
+    let mut rl = FullJournal::new(random_u32!(), &pub_keys[0], &sec_keys[0]).unwrap();
 
     for _i in 0..ITER - 1 {
         let trusted = rl.get_trusted_devices().clone();
@@ -312,12 +272,12 @@ fn main() {
     }
     println!("Permanent hash: {}",
              morphingidentity::utils::fmt_hex(&rl.get_permanent_hash()[..]));
-    for (pk, l) in &rl.get_trusted_devices() {
+    for (pk, j) in &rl.get_trusted_devices() {
         println!("Trusted devices: Subject PublicKey: {}, Issuer PublicKey {}, count {}",
                  morphingidentity::utils::fmt_hex(&pk[..]),
-                 morphingidentity::utils::fmt_hex(&l.issuer_publickey[..]),
-                 l.count);
-        let mut pe = l;
+                 morphingidentity::utils::fmt_hex(&j.issuer_publickey[..]),
+                 j.count);
+        let mut pe = j;
         print!("Parent(s): ");
         loop {
             match rl.get_parent(pe) {
@@ -334,5 +294,5 @@ fn main() {
             }
         }
     }
-    assert!(rl.check_ledger());
+    assert!(rl.check_journal());
 }

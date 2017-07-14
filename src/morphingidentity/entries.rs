@@ -4,7 +4,7 @@ use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, SIGNAT
                                          PUBLICKEYBYTES};
 use cbor::{Config, Decoder, Encoder, DecodeResult};
 use std::io::Cursor;
-use ledger::FullLedger;
+use journal::FullJournal;
 
 use utils::{to_u8_32, to_u8_64};
 
@@ -39,9 +39,9 @@ pub enum DeviceType {
 
 #[derive(Clone)]
 #[derive(PartialEq)]
-pub struct LedgerEntry {
+pub struct JournalEntry {
     pub format_version: u32, // version of the data format of an entry
-    pub ledger_id: u32, // version of the current ledger ID
+    pub journal_id: u32, // version of the current journal ID
     pub history_hash: Digest, // hash over previous versions
     pub extension_hash: Digest, // hash over the entry extension
     pub count: u32, // incremental version number, starts at 0
@@ -53,19 +53,19 @@ pub struct LedgerEntry {
     pub issuer_signature: Signature, // signature of the issuer
 }
 
-impl LedgerEntry {
+impl JournalEntry {
     pub fn new(format_version: u32,
-               ledger_id: u32,
+               journal_id: u32,
                history_hash: Digest,
                count: u32,
                operation: EntryType,
                device_type: DeviceType)
-               -> LedgerEntry {
+               -> JournalEntry {
         let empty_key = PublicKey::from_slice(&[0; sign::PUBLICKEYBYTES]).unwrap();
         let empty_signature = Signature::from_slice(&[0; SIGNATUREBYTES]).unwrap();
-        LedgerEntry {
+        JournalEntry {
             format_version: format_version,
-            ledger_id: ledger_id,
+            journal_id: journal_id,
             history_hash: history_hash,
             extension_hash: hash(&[]),
             count: count,
@@ -114,7 +114,7 @@ impl LedgerEntry {
     pub fn encode_unsigned_entry(&self) -> Encoder<Cursor<Vec<u8>>> {
         let mut e = Encoder::new(Cursor::new(Vec::new()));
         e.u32(self.format_version).unwrap();
-        e.u32(self.ledger_id).unwrap();
+        e.u32(self.journal_id).unwrap();
         e.bytes(&self.history_hash[..]).unwrap();
         e.bytes(&self.extension_hash[..]).unwrap();
         e.u32(self.count).unwrap();
@@ -144,11 +144,11 @@ impl LedgerEntry {
     pub fn encode_as_cbor(&self) -> Vec<u8> {
         self.encode_signed_entry().into_writer().into_inner()
     }
-    pub fn new_from_cbor(bytes: Vec<u8>) -> DecodeResult<LedgerEntry> {
+    pub fn new_from_cbor(bytes: Vec<u8>) -> DecodeResult<JournalEntry> {
         let mut d = Decoder::new(Config::default(), Cursor::new(&bytes[..]));
-        Ok(LedgerEntry {
+        Ok(JournalEntry {
             format_version: d.u32()?,
-            ledger_id: d.u32()?,
+            journal_id: d.u32()?,
             history_hash: Digest(to_u8_32(&d.bytes()?[0..DIGESTBYTES]).unwrap()),
             extension_hash: Digest(to_u8_32(&d.bytes()?[0..DIGESTBYTES]).unwrap()),
             count: d.u32()?,
@@ -179,8 +179,8 @@ impl EntryExtension {
         }
         hash(&e.into_writer().into_inner())
     }
-    pub fn create_extension(&self, ledger: &FullLedger) -> EntryExtension {
-        let trusted_devices = ledger.get_trusted_devices();
+    pub fn create_extension(&self, journal: &FullJournal) -> EntryExtension {
+        let trusted_devices = journal.get_trusted_devices();
         let mut permanent_devices: Vec<PublicKey> = Vec::new();
         for key in trusted_devices.keys() {
             permanent_devices.push(key.clone());
