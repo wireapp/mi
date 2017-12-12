@@ -1,5 +1,4 @@
 extern crate sodiumoxide;
-extern crate rustc_serialize;
 extern crate cbor;
 
 extern crate morphingidentity;
@@ -11,11 +10,7 @@ use sodiumoxide::randombytes::randombytes;
 use morphingidentity::entries::{EntryType, JournalEntry, DeviceType};
 use morphingidentity::journal::FullJournal;
 
-use cbor::{Config, Decoder, Encoder};
-use std::io::Cursor;
-use rustc_serialize::hex::FromHex;
-
-use morphingidentity::utils::fmt_hex;
+use cbor::{Decoder, Encoder};
 
 // use std::result::{Ok, Err};
 
