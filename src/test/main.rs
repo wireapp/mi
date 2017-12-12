@@ -10,8 +10,6 @@ use sodiumoxide::randombytes::randombytes;
 use morphingidentity::entries::{EntryType, JournalEntry, DeviceType};
 use morphingidentity::journal::FullJournal;
 
-use cbor::{Decoder, Encoder};
-
 // use std::result::{Ok, Err};
 
 const MAX_DEVICES: usize = 8;
