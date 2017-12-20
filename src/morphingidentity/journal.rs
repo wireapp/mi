@@ -10,7 +10,7 @@ const FORMAT_ENTRY_VERSION: u32 = 1;
 const FORMAT_JOURNAL_VERSION: u32 = 1;
 const MAX_DEVICES: usize = 8;
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy)]
 pub struct UserID(pub u32);
 
 impl From<u32> for UserID {
@@ -19,7 +19,7 @@ impl From<u32> for UserID {
     }
 }
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy)]
 pub struct JournalID(pub u32);
 
 impl From<u32> for JournalID {
@@ -28,6 +28,7 @@ impl From<u32> for JournalID {
     }
 }
 
+#[derive(PartialEq, Clone)]
 pub struct FullJournal {
     version: u32,
     journal_id: u32,
@@ -91,9 +92,9 @@ impl FullJournal {
         }
         Some(le)
     }
-    pub fn create_add_permanent_device() {}
-    pub fn create_add_temporary_device() {}
-    pub fn create_remove_device() {}
+    // pub fn create_add_permanent_device() {}
+    // pub fn create_add_temporary_device() {}
+    // pub fn create_remove_device() {}
     pub fn sign_entry_as_subject(&self,
                                  le: &mut JournalEntry,
                                  subject_secretkey: &SecretKey)
@@ -308,8 +309,8 @@ impl FullJournal {
     pub fn get_journal_version(&self) -> u32 {
         self.version
     }
-    pub fn get_journal_id(&self) -> u32 {
-        self.journal_id
+    pub fn get_journal_id(&self) -> JournalID {
+        JournalID(self.journal_id)
     }
     pub fn get_journal_hash(&self) -> Digest {
         self.hash
