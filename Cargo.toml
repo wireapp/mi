@@ -12,6 +12,7 @@ cbor-codec    = ">= 0.7.1"
 [dependencies.sodiumoxide]
 version = ">= 0.0.12"
 default-features = false
+features = ["std"]
 
 [lib]
 name = "morphingidentity"
