@@ -29,4 +29,12 @@ impl JournalStore {
             None => None,
         }
     }
+    pub fn remove_orphaned_journals(&mut self) {
+        JournalStore::retain_valid_journals(&self.journal_id_by_user_id,
+                                            &mut self.journal_by_journal_id);
+    }
+    fn retain_valid_journals(h1: &HashMap<UserID, JournalID>,
+                             h2: &mut HashMap<JournalID, FullJournal>) {
+        h2.retain(|&k, _| h1.values().any(|x| *x == k));
+    }
 }
