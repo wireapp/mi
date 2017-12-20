@@ -3,8 +3,11 @@ use utils::fmt_hex;
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
+use cbor::{Config, Decoder, Encoder, DecodeResult, DecodeError};
+use std::io::Cursor;
 
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_ENTRY_VERSION: u32 = 1;
+const FORMAT_JOURNAL_VERSION: u32 = 1;
 const MAX_DEVICES: usize = 8;
 
 pub struct FullJournal {
@@ -20,7 +23,7 @@ impl FullJournal {
                issuer_publickey: &PublicKey,
                issuer_sk: &SecretKey)
                -> Option<FullJournal> {
-        let mut le: JournalEntry = JournalEntry::new(FORMAT_VERSION,
+        let mut le: JournalEntry = JournalEntry::new(FORMAT_ENTRY_VERSION,
                                                      _journal_id,
                                                      hash(&[]),
                                                      0,
@@ -58,7 +61,7 @@ impl FullJournal {
             operation == EntryType::Remove) {
             return None;
         }
-        let mut le: JournalEntry = JournalEntry::new(FORMAT_VERSION,
+        let mut le: JournalEntry = JournalEntry::new(FORMAT_ENTRY_VERSION,
                                                      self.journal_id,
                                                      self.entries.last().unwrap().advanced_hash(),
                                                      self.version + 1,
@@ -82,9 +85,10 @@ impl FullJournal {
     pub fn test_entry(&self, le: &JournalEntry) -> bool {
         if (le.operation == EntryType::Add && self.trusted_devices.len() >= MAX_DEVICES) ||
            (le.operation == EntryType::Remove && self.trusted_devices.len() < 2) ||
-           self.version >= u32::max_value() || le.format_version != FORMAT_VERSION ||
+           self.version >= (u32::max_value() - 1) ||
+           le.format_version != FORMAT_ENTRY_VERSION ||
            le.journal_id != self.journal_id ||
-           &self.entries.last().unwrap().advanced_hash()[..] != &le.history_hash[..] ||
+           self.entries.last().unwrap().advanced_hash()[..] != le.history_hash[..] ||
            le.count != (self.version + 1) {
             return false;
         }
@@ -113,7 +117,7 @@ impl FullJournal {
         if self.test_entry(&le) {
             self.entries.push(le.clone());
             if le.operation == EntryType::Add {
-                self.trusted_devices.insert(le.subject_publickey.clone(), le.clone());
+                self.trusted_devices.insert(le.subject_publickey, le);
             } else if le.operation == EntryType::Remove {
                 self.trusted_devices.remove(&le.subject_publickey);
             }
@@ -121,7 +125,73 @@ impl FullJournal {
             self.version += 1;
             return true;
         }
+        drop(le);
         false
+    }
+    pub fn encode_as_cbor(&self) -> Vec<u8> {
+        let mut e = Encoder::new(Cursor::new(Vec::new()));
+        let num = self.entries.len();
+        println!("Number of entries: {}", num);
+        e.u32(FORMAT_JOURNAL_VERSION).unwrap();
+        e.u32(num as u32).unwrap();
+        for i in 0..num {
+            self.entries[i].encode_signed_entry(&mut e).unwrap();
+        }
+        e.into_writer().into_inner()
+    }
+    pub fn new_from_cbor(bytes: Vec<u8>) -> DecodeResult<FullJournal> {
+        let mut d = Decoder::new(Config::default(), Cursor::new(bytes));
+        if d.u32()? != FORMAT_JOURNAL_VERSION {
+            return Err(DecodeError::UnexpectedBreak);
+        }
+        let num = d.u32()?;
+        let mut journal: FullJournal = FullJournal {
+            version: 0,
+            journal_id: 0,
+            entries: Vec::new(),
+            trusted_devices: HashMap::new(),
+            hash: hash(&[]),
+        };
+
+        if num >= 1 {
+            let first_entry = JournalEntry::new_from_cbor(&mut d)?;
+            if FullJournal::check_first_entry(&first_entry) {
+                let mut entries: Vec<JournalEntry> = Vec::new();
+                entries.push(first_entry.clone());
+                let mut trusted_devices: HashMap<PublicKey, JournalEntry> = HashMap::new();
+                trusted_devices.insert(first_entry.issuer_publickey, first_entry.clone());
+                journal = FullJournal {
+                    version: 0,
+                    journal_id: first_entry.journal_id,
+                    entries: entries,
+                    trusted_devices: trusted_devices,
+                    hash: hash(&[]),
+                }
+            }
+        } else {
+            return Err(DecodeError::UnexpectedBreak);
+        }
+
+        if num > 1 {
+            for _ in 1..num {
+                let e = JournalEntry::new_from_cbor(&mut d)?;
+                journal.add_entry(e);
+            }
+        }
+
+        Ok(journal)
+    }
+    fn check_first_entry(entry: &JournalEntry) -> bool {
+        if entry.operation != EntryType::Add {
+            return false;
+        }
+        if entry.subject_publickey != entry.issuer_publickey {
+            return false;
+        }
+        if !entry.verify_issuer_signature() {
+            return false;
+        }
+        true
     }
     pub fn check_journal(&mut self) -> bool {
         println!("check_journal: started");
@@ -130,25 +200,19 @@ impl FullJournal {
             return false;
         }
         let first_entry: &JournalEntry = self.entries.first().unwrap();
-        if first_entry.operation != EntryType::Add {
+        if !FullJournal::check_first_entry(first_entry) {
             return false;
         }
-        if first_entry.subject_publickey != first_entry.issuer_publickey {
-            return false;
-        }
-        if !first_entry.verify_issuer_signature() {
-            return false;
-        }
-        trusted_devices.insert(first_entry.issuer_publickey.clone(), first_entry.clone());
+        trusted_devices.insert(first_entry.issuer_publickey, first_entry.clone());
         if self.entries.len() == 1 {
             self.trusted_devices = trusted_devices;
             return true;
         }
         println!("check_journal: Found {} entries", self.entries.len());
         for i in 1..(self.entries.len()) {
-            let le = self.entries.get(i).unwrap();
+            let le = &self.entries[i];
             if le.journal_id != self.journal_id ||
-               &self.entries.get(i - 1).unwrap().advanced_hash()[..] != &le.history_hash[..] ||
+               self.entries[i - 1].advanced_hash()[..] != le.history_hash[..] ||
                le.count != i as u32 {
                 if le.count != i as u32 {
                     println!("check_journal: count mismatch, should be {}, found {}",
@@ -156,12 +220,12 @@ impl FullJournal {
                              le.count);
                 } else if le.journal_id != self.journal_id {
                     println!("check_journal: ID mismatch");
-                } else if &self.entries.get(i - 1).unwrap().advanced_hash()[..] != &le.history_hash[..] {
+                } else if self.entries[i - 1].advanced_hash()[..] != le.history_hash[..] {
                     println!("check_journal: hash mismatch, advanced hash from entry {} is \
                               different",
-                             &self.entries.get(i - 1).unwrap().count);
+                             &self.entries[i - 1].count);
                     println!("check_journal: actual hash: {}",
-                             fmt_hex(&self.entries.get(i - 1).unwrap().advanced_hash()[..]));
+                             fmt_hex(&self.entries[i - 1].advanced_hash()[..]));
                     println!("check_journal: advanced hash: {}",
                              fmt_hex(&le.history_hash[..]));
                 }
@@ -172,10 +236,8 @@ impl FullJournal {
                    le.verify_issuer_signature() &&
                    le.verify_subject_signature() &&
                    !trusted_devices.contains_key(&le.subject_publickey) &&
-                   trusted_devices.get(&le.issuer_publickey)
-                    .unwrap()
-                    .capability_can_add() {
-                    trusted_devices.insert(le.subject_publickey.clone(), le.clone());
+                   trusted_devices[&le.issuer_publickey].capability_can_add() {
+                    trusted_devices.insert(le.subject_publickey, le.clone());
                 } else {
                     println!("check_journal: Entry of type 'Add' error");
                     if !trusted_devices.contains_key(&le.issuer_publickey) {
@@ -196,12 +258,8 @@ impl FullJournal {
                 if trusted_devices.contains_key(&le.issuer_publickey) &&
                    le.verify_issuer_signature() &&
                    trusted_devices.contains_key(&le.subject_publickey) &&
-                   trusted_devices.get(&le.issuer_publickey)
-                    .unwrap()
-                    .capability_can_remove() &&
-                   !trusted_devices.get(&le.subject_publickey)
-                    .unwrap()
-                    .capability_cannot_be_removed() {
+                   trusted_devices[&le.issuer_publickey].capability_can_remove() &&
+                   !trusted_devices[&le.subject_publickey].capability_cannot_be_removed() {
                     trusted_devices.remove(&le.subject_publickey);
                 } else {
                     println!("check_journal: Entry of type 'Remove' error");
@@ -246,7 +304,7 @@ impl FullJournal {
         }
         for i in 0..start + 1 {
             let l = &self.entries[start - i];
-            if &l.subject_publickey[..] == &key[..] && l.operation == EntryType::Add {
+            if l.subject_publickey[..] == key[..] && l.operation == EntryType::Add {
                 return Some(l);
             }
         }
@@ -271,9 +329,10 @@ pub struct ShortJournal {
 impl ShortJournal {
     pub fn new() {}
     pub fn test_entry(&self, le: &JournalEntry) -> bool {
-        if self.trusted_devices.len() >= MAX_DEVICES || self.version >= u32::max_value() ||
-           le.format_version != FORMAT_VERSION || le.journal_id != self.journal_id ||
-           &self.entry.advanced_hash()[..] == &le.history_hash[..] ||
+        if self.trusted_devices.len() >= MAX_DEVICES || self.version >= (u32::max_value() - 1) ||
+           le.format_version != FORMAT_ENTRY_VERSION ||
+           le.journal_id != self.journal_id ||
+           self.entry.advanced_hash()[..] == le.history_hash[..] ||
            le.count != (self.version + 1) {
             return false;
         }
@@ -296,13 +355,14 @@ impl ShortJournal {
         if self.test_entry(&le) {
             self.entry = le.clone();
             if le.operation == EntryType::Add {
-                self.trusted_devices.insert(le.subject_publickey.clone(), le.clone());
+                self.trusted_devices.insert(le.subject_publickey, le);
             } else if le.operation == EntryType::Remove {
                 self.trusted_devices.remove(&le.subject_publickey);
             }
             self.hash = self.entry.advanced_hash();
             return true;
         }
+        drop(le);
         false
     }
     pub fn get_trusted(&self) -> HashMap<PublicKey, JournalEntry> {

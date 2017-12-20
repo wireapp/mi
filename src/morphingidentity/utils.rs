@@ -22,7 +22,7 @@ pub fn to_u8_64(buf: &[u8]) -> Option<[u8; 64]> {
     Some(array)
 }
 
-const HEX_DIGITS: &'static [u8] = b"0123456789abcdef";
+const HEX_DIGITS: &[u8] = b"0123456789abcdef";
 
 pub fn fmt_hex(xs: &[u8]) -> String {
     let mut v = Vec::with_capacity(xs.len() * 2);

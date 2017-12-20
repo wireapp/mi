@@ -2,13 +2,13 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash::sha256::{hash, Digest, DIGESTBYTES};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, SIGNATUREBYTES,
                                          PUBLICKEYBYTES};
-use cbor::{Config, Decoder, Encoder, DecodeResult};
+use cbor::{Decoder, Encoder, EncodeResult, DecodeResult};
 use std::io::Cursor;
 use journal::FullJournal;
 
 use utils::{to_u8_32, to_u8_64};
 
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_ENTRY_VERSION: u32 = 1;
 
 #[derive(PartialEq, Clone)]
 #[repr(u32)]
@@ -78,18 +78,18 @@ impl JournalEntry {
         }
     }
     pub fn set_identities(&mut self, subject_pk: &PublicKey, issuer_pk: &PublicKey) {
-        self.subject_publickey = subject_pk.clone();
-        self.issuer_publickey = issuer_pk.clone();
+        self.subject_publickey = *subject_pk;
+        self.issuer_publickey = *issuer_pk;
     }
     pub fn add_subject_signature(&mut self, secretkey: &SecretKey) -> bool {
         if self.operation == EntryType::Remove {
             return false;
         }
-        self.subject_signature = sign::sign_detached(&self.partial_hash()[..], &secretkey);
+        self.subject_signature = sign::sign_detached(&self.partial_hash()[..], secretkey);
         self.verify_subject_signature()
     }
     pub fn add_issuer_signature(&mut self, key: &SecretKey) -> bool {
-        self.issuer_signature = sign::sign_detached(&self.partial_hash()[..], &key);
+        self.issuer_signature = sign::sign_detached(&self.partial_hash()[..], key);
         self.verify_issuer_signature()
     }
     pub fn verify_subject_signature(&self) -> bool {
@@ -111,41 +111,43 @@ impl JournalEntry {
     pub fn capability_cannot_be_removed(&self) -> bool {
         (self.capabilities & CapType::NonRemovableCap as u32) > 0
     }
-    pub fn encode_unsigned_entry(&self) -> Encoder<Cursor<Vec<u8>>> {
-        let mut e = Encoder::new(Cursor::new(Vec::new()));
-        e.u32(self.format_version).unwrap();
-        e.u32(self.journal_id).unwrap();
-        e.bytes(&self.history_hash[..]).unwrap();
-        e.bytes(&self.extension_hash[..]).unwrap();
+    pub fn encode_unsigned_entry(&self, e: &mut Encoder<Cursor<Vec<u8>>>) -> EncodeResult {
+        e.u32(self.format_version)?;
+        e.u32(self.journal_id)?;
+        e.bytes(&self.history_hash[..])?;
+        e.bytes(&self.extension_hash[..])?;
         e.u32(self.count).unwrap();
-        e.u32(self.operation.clone() as u32).unwrap();
-        e.u32(self.capabilities.clone() as u32).unwrap();
-        e.bytes(&self.subject_publickey[..]).unwrap();
-        e.bytes(&self.issuer_publickey[..]).unwrap();
-        e
+        e.u32(self.operation.clone() as u32)?;
+        e.u32(self.capabilities as u32)?;
+        e.bytes(&self.subject_publickey[..])?;
+        e.bytes(&self.issuer_publickey[..])?;
+        Ok(())
     }
-    pub fn encode_signed_entry(&self) -> Encoder<Cursor<Vec<u8>>> {
-        let mut e = self.encode_unsigned_entry();
-        e.bytes(&self.subject_signature[..]).unwrap();
-        e.bytes(&self.issuer_signature[..]).unwrap();
-        e
+    pub fn encode_signed_entry(&self, e: &mut Encoder<Cursor<Vec<u8>>>) -> EncodeResult {
+        self.encode_unsigned_entry(e)?;
+        e.bytes(&self.subject_signature[..])?;
+        e.bytes(&self.issuer_signature[..])?;
+        Ok(())
     }
     pub fn partial_hash(&self) -> Digest {
-        let e = self.encode_unsigned_entry();
+        let mut e = Encoder::new(Cursor::new(Vec::new()));
+        self.encode_unsigned_entry(&mut e).unwrap();
         hash(&e.into_writer().into_inner())
     }
     pub fn complete_hash(&self) -> Digest {
-        let e = self.encode_signed_entry();
+        let mut e = Encoder::new(Cursor::new(Vec::new()));
+        self.encode_signed_entry(&mut e).unwrap();
         hash(&e.into_writer().into_inner())
     }
     pub fn advanced_hash(&self) -> Digest {
         self.complete_hash()
     }
     pub fn encode_as_cbor(&self) -> Vec<u8> {
-        self.encode_signed_entry().into_writer().into_inner()
+        let mut e = Encoder::new(Cursor::new(Vec::new()));
+        self.encode_signed_entry(&mut e).unwrap();
+        e.into_writer().into_inner()
     }
-    pub fn new_from_cbor(bytes: Vec<u8>) -> DecodeResult<JournalEntry> {
-        let mut d = Decoder::new(Config::default(), Cursor::new(&bytes[..]));
+    pub fn new_from_cbor(d: &mut Decoder<Cursor<Vec<u8>>>) -> DecodeResult<JournalEntry> {
         Ok(JournalEntry {
             format_version: d.u32()?,
             journal_id: d.u32()?,
@@ -187,7 +189,7 @@ impl EntryExtension {
         }
         permanent_devices.sort();
         EntryExtension {
-            format_version: FORMAT_VERSION,
+            format_version: FORMAT_ENTRY_VERSION,
             permanent_count: permanent_devices.len() as u32,
             permanent_subject_publickeys: permanent_devices,
         }

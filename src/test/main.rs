@@ -10,8 +10,6 @@ use sodiumoxide::randombytes::randombytes;
 use morphingidentity::entries::{EntryType, JournalEntry, DeviceType};
 use morphingidentity::journal::FullJournal;
 
-// use std::result::{Ok, Err};
-
 const MAX_DEVICES: usize = 8;
 
 fn init() {
@@ -28,10 +26,10 @@ macro_rules! random_u8 {
 }
 
 macro_rules! random_u32 {
-    () => (((randombytes(1)[0] as u32) << 24 |
-    (randombytes(1)[0] as u32) << 16 |
-    (randombytes(1)[0] as u32) << 8 |
-    randombytes(1)[0] as u32))
+    () => ((u32::from(randombytes(1)[0]) << 24 |
+    u32::from(randombytes(1)[0]) << 16 |
+    u32::from(randombytes(1)[0]) << 8 |
+    u32::from(randombytes(1)[0])))
 }
 
 // This is the main function
@@ -58,21 +56,6 @@ fn main() {
     assert!(je.add_issuer_signature(&issuer_sk));
     assert!(je.add_subject_signature(&subject_sk));
 
-    let encoded = je.encode_as_cbor();
-
-    let decoded = JournalEntry::new_from_cbor(encoded.clone()).unwrap();
-
-
-    let dec = decoded.clone();
-    let reenc = dec.encode_as_cbor();
-
-    let invalid_entry = je.clone();
-
-    assert_eq!(encoded, reenc);
-
-    println!("Length of journal entry: {}", encoded.len());
-
-
     // ---------------   Example usage
 
     // Create a new journal with journal ID 1000 and a first entry
@@ -82,7 +65,7 @@ fn main() {
     assert!(full_journal.check_journal());
 
     // Test if a random entry can be added to the journal
-    assert!(!full_journal.test_entry(&invalid_entry));
+    // assert!(!full_journal.test_entry(&invalid_entry));
 
     // Get the journal version (number of entries in the journal)
     assert_eq!(full_journal.get_journal_version(), 0);
@@ -181,6 +164,11 @@ fn main() {
                  j.count);
     }
 
+    fuzz_testing();
+}
+
+fn fuzz_testing() {
+
     // -------------- Fuzzing
     // Building a long journal with random entries to do some fuzzing
 
@@ -188,7 +176,7 @@ fn main() {
     println!("Generating {} entries", ITER);
 
     const DEVICES: usize = 8;
-    const ITER: u32 = 1000;
+    const ITER: u32 = 10_000;
 
     let mut sec_keys = Vec::new();
     let mut pub_keys = Vec::new();
@@ -213,7 +201,7 @@ fn main() {
         loop {
             let mut c = random_usize!() % (trusted.len() as usize);
             counter = 0;
-            for (_k, e) in &trusted {
+            for e in trusted.values() {
                 issuer = e;
                 iss_pk = &issuer.subject_publickey;
                 if counter == c {
@@ -221,14 +209,10 @@ fn main() {
                 }
                 counter += 1;
             }
-            let mut index = 0;
-            for i in 0..pub_keys.len() {
-                if &pub_keys[i][..] == &iss_pk[..] {
-                    index = i;
-                    break;
-                }
-            }
-            iss_sk = &sec_keys[index];
+
+            let found_index = pub_keys.iter().enumerate().find(|&p| p.1[..] == iss_pk[..]).unwrap();
+
+            iss_sk = &sec_keys[found_index.0];
             c = random_usize!() % DEVICES;
             sub_sk = &sec_keys[c];
             sub_pk = &pub_keys[c];
@@ -272,20 +256,30 @@ fn main() {
                  j.count);
         let mut pe = j;
         print!("Parent(s): ");
-        loop {
-            match rl.get_parent(pe) {
-                Some(x) => {
-                    pe = x;
-                    if pe.count == 0 {
-                        println!("root.");
-                        break;
-                    } else {
-                        print!("{}, ", pe.count);
-                    }
-                }
-                None => break,
+        while let Some(x) = rl.get_parent(pe) {
+            pe = x;
+            if pe.count == 0 {
+                println!("root.");
+                break;
+            } else {
+                print!("{}, ", pe.count);
             }
         }
+        // loop {
+        // match rl.get_parent(pe) {
+        // Some(x) => {
+        // pe = x;
+        // if pe.count == 0 {
+        // println!("root.");
+        // break;
+        // } else {
+        // print!("{}, ", pe.count);
+        // }
+        // }
+        // None => break,
+        // }
+        // }
+        //
     }
     assert!(rl.check_journal());
 }
