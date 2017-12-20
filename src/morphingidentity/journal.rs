@@ -10,6 +10,24 @@ const FORMAT_ENTRY_VERSION: u32 = 1;
 const FORMAT_JOURNAL_VERSION: u32 = 1;
 const MAX_DEVICES: usize = 8;
 
+#[derive(Hash, Eq, PartialEq)]
+pub struct UserID(pub u32);
+
+impl From<u32> for UserID {
+    fn from(n: u32) -> UserID {
+        UserID(n)
+    }
+}
+
+#[derive(Hash, Eq, PartialEq)]
+pub struct JournalID(pub u32);
+
+impl From<u32> for JournalID {
+    fn from(n: u32) -> JournalID {
+        JournalID(n)
+    }
+}
+
 pub struct FullJournal {
     version: u32,
     journal_id: u32,

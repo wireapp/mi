@@ -1,4 +1,5 @@
 extern crate cbor;
+use journal::{UserID, JournalID};
 
 pub fn to_u8_32(buf: &[u8]) -> Option<[u8; 32]> {
     if buf.len() < 32 {
@@ -33,7 +34,6 @@ pub fn fmt_hex(xs: &[u8]) -> String {
     unsafe { String::from_utf8_unchecked(v) }
 }
 
-#[allow(dead_code)]
-pub fn injective_concat() -> [u8; 1] {
-    [0]
+pub fn journal_id_to_user_id(u: JournalID) -> UserID {
+    UserID::from(!u.0)
 }
