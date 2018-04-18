@@ -26,10 +26,10 @@ macro_rules! random_u8 {
 }
 
 macro_rules! random_u32 {
-    () => ((u32::from(randombytes(1)[0]) << 24 |
+    () => (u32::from(randombytes(1)[0]) << 24 |
     u32::from(randombytes(1)[0]) << 16 |
     u32::from(randombytes(1)[0]) << 8 |
-    u32::from(randombytes(1)[0])))
+    u32::from(randombytes(1)[0]))
 }
 
 // This is the main function
