@@ -1,6 +1,3 @@
-extern crate cbor;
-use journal::{UserID, JournalID};
-
 pub fn to_u8_32(buf: &[u8]) -> Option<[u8; 32]> {
     if buf.len() < 32 {
         return None;
@@ -32,8 +29,4 @@ pub fn fmt_hex(xs: &[u8]) -> String {
         v.push(HEX_DIGITS[(x & 0xf) as usize])
     }
     unsafe { String::from_utf8_unchecked(v) }
-}
-
-pub fn journal_id_to_user_id(u: JournalID) -> UserID {
-    UserID::from(!u.0)
 }

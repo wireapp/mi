@@ -1,10 +1,11 @@
-use entries::{JournalEntry, EntryType, DeviceType};
+use entries::{DeviceType, EntryType, JournalEntry};
 use utils::fmt_hex;
+use cbor_utils::{run_decoder, run_encoder};
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
-use cbor::{Config, Decoder, Encoder, DecodeResult, DecodeError};
-use std::io::Cursor;
+use cbor::{DecodeError, DecodeResult};
+use uuid::Uuid;
 
 const FORMAT_ENTRY_VERSION: u32 = 1;
 const FORMAT_JOURNAL_VERSION: u32 = 1;
@@ -20,10 +21,10 @@ impl From<u32> for UserID {
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]
-pub struct JournalID(pub u32);
+pub struct JournalID(pub Uuid);
 
-impl From<u32> for JournalID {
-    fn from(n: u32) -> JournalID {
+impl From<Uuid> for JournalID {
+    fn from(n: Uuid) -> JournalID {
         JournalID(n)
     }
 }
@@ -31,14 +32,14 @@ impl From<u32> for JournalID {
 #[derive(PartialEq, Clone)]
 pub struct FullJournal {
     version: u32,
-    journal_id: u32,
+    journal_id: Uuid,
     hash: Digest,
     entries: Vec<JournalEntry>,
     trusted_devices: HashMap<PublicKey, JournalEntry>,
 }
 
 impl FullJournal {
-    pub fn new(_journal_id: u32,
+    pub fn new(_journal_id: Uuid,
                issuer_publickey: &PublicKey,
                issuer_sk: &SecretKey)
                -> Option<FullJournal> {
@@ -148,57 +149,59 @@ impl FullJournal {
         false
     }
     pub fn encode_as_cbor(&self) -> Vec<u8> {
-        let mut e = Encoder::new(Cursor::new(Vec::new()));
-        let num = self.entries.len();
-        println!("Number of entries: {}", num);
-        e.u32(FORMAT_JOURNAL_VERSION).unwrap();
-        e.u32(num as u32).unwrap();
-        for i in 0..num {
-            self.entries[i].encode_signed_entry(&mut e).unwrap();
-        }
-        e.into_writer().into_inner()
+        run_encoder(&|mut e| {
+            let num = self.entries.len();
+            println!("Number of entries: {}", num);
+            e.u32(FORMAT_JOURNAL_VERSION)?;
+            e.u32(num as u32)?;
+            for i in 0..num {
+                self.entries[i].encode_signed_entry(&mut e)?;
+            }
+            Ok(())
+        }).unwrap()
     }
     pub fn new_from_cbor(bytes: Vec<u8>) -> DecodeResult<FullJournal> {
-        let mut d = Decoder::new(Config::default(), Cursor::new(bytes));
-        if d.u32()? != FORMAT_JOURNAL_VERSION {
-            return Err(DecodeError::UnexpectedBreak);
-        }
-        let num = d.u32()?;
-        let mut journal: FullJournal = FullJournal {
-            version: 0,
-            journal_id: 0,
-            entries: Vec::new(),
-            trusted_devices: HashMap::new(),
-            hash: hash(&[]),
-        };
+        run_decoder(bytes, &|mut d| {
+            if d.u32()? != FORMAT_JOURNAL_VERSION {
+                return Err(DecodeError::UnexpectedBreak);
+            }
+            let num = d.u32()?;
+            let mut journal: FullJournal = FullJournal {
+                version: 0,
+                journal_id: Uuid::nil(),
+                entries: Vec::new(),
+                trusted_devices: HashMap::new(),
+                hash: hash(&[]),
+            };
 
-        if num >= 1 {
-            let first_entry = JournalEntry::new_from_cbor(&mut d)?;
-            if FullJournal::check_first_entry(&first_entry) {
-                let mut entries: Vec<JournalEntry> = Vec::new();
-                entries.push(first_entry.clone());
-                let mut trusted_devices: HashMap<PublicKey, JournalEntry> = HashMap::new();
-                trusted_devices.insert(first_entry.issuer_publickey, first_entry.clone());
-                journal = FullJournal {
-                    version: 0,
-                    journal_id: first_entry.journal_id,
-                    entries: entries,
-                    trusted_devices: trusted_devices,
-                    hash: hash(&[]),
+            if num >= 1 {
+                let first_entry = JournalEntry::new_from_cbor(&mut d)?;
+                if FullJournal::check_first_entry(&first_entry) {
+                    let mut entries: Vec<JournalEntry> = Vec::new();
+                    entries.push(first_entry.clone());
+                    let mut trusted_devices: HashMap<PublicKey, JournalEntry> = HashMap::new();
+                    trusted_devices.insert(first_entry.issuer_publickey, first_entry.clone());
+                    journal = FullJournal {
+                        version: 0,
+                        journal_id: first_entry.journal_id,
+                        entries: entries,
+                        trusted_devices: trusted_devices,
+                        hash: hash(&[]),
+                    }
+                }
+            } else {
+                return Err(DecodeError::UnexpectedBreak);
+            }
+
+            if num > 1 {
+                for _ in 1..num {
+                    let e = JournalEntry::new_from_cbor(&mut d)?;
+                    journal.add_entry(e);
                 }
             }
-        } else {
-            return Err(DecodeError::UnexpectedBreak);
-        }
 
-        if num > 1 {
-            for _ in 1..num {
-                let e = JournalEntry::new_from_cbor(&mut d)?;
-                journal.add_entry(e);
-            }
-        }
-
-        Ok(journal)
+            Ok(journal)
+        })
     }
     fn check_first_entry(entry: &JournalEntry) -> bool {
         if entry.operation != EntryType::Add {
@@ -339,7 +342,7 @@ impl FullJournal {
 
 pub struct ShortJournal {
     version: u32,
-    journal_id: u32,
+    journal_id: Uuid,
     hash: Digest,
     entry: JournalEntry,
     trusted_devices: HashMap<PublicKey, JournalEntry>,
@@ -396,7 +399,7 @@ impl ShortJournal {
     pub fn get_journal_version(&self) -> u32 {
         self.version
     }
-    pub fn get_journal_id(&self) -> u32 {
+    pub fn get_journal_id(&self) -> Uuid {
         self.journal_id
     }
     pub fn get_journal_hash(&self) -> Digest {
