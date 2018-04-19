@@ -3,10 +3,11 @@ use sodiumoxide::crypto::hash::sha256::{hash, Digest, DIGESTBYTES};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, SIGNATUREBYTES,
                                          PUBLICKEYBYTES};
 use cbor::{Decoder, Encoder, EncodeResult, DecodeResult};
+use uuid::Uuid;
 use std::io::Cursor;
 use journal::FullJournal;
 
-use utils::{to_u8_32, to_u8_64};
+use utils::{to_u8_32, to_u8_64, encode_uuid, decode_uuid, unsafe_run_encoder};
 
 const FORMAT_ENTRY_VERSION: u32 = 1;
 
@@ -41,7 +42,7 @@ pub enum DeviceType {
 #[derive(PartialEq)]
 pub struct JournalEntry {
     pub format_version: u32, // version of the data format of an entry
-    pub journal_id: u32, // version of the current journal ID
+    pub journal_id: Uuid, // version of the current journal ID
     pub history_hash: Digest, // hash over previous versions
     pub extension_hash: Digest, // hash over the entry extension
     pub count: u32, // incremental version number, starts at 0
@@ -55,7 +56,7 @@ pub struct JournalEntry {
 
 impl JournalEntry {
     pub fn new(format_version: u32,
-               journal_id: u32,
+               journal_id: Uuid,
                history_hash: Digest,
                count: u32,
                operation: EntryType,
@@ -113,10 +114,10 @@ impl JournalEntry {
     }
     pub fn encode_unsigned_entry(&self, e: &mut Encoder<Cursor<Vec<u8>>>) -> EncodeResult {
         e.u32(self.format_version)?;
-        e.u32(self.journal_id)?;
+        encode_uuid(self.journal_id, e)?;
         e.bytes(&self.history_hash[..])?;
         e.bytes(&self.extension_hash[..])?;
-        e.u32(self.count).unwrap();
+        e.u32(self.count)?;
         e.u32(self.operation.clone() as u32)?;
         e.u32(self.capabilities as u32)?;
         e.bytes(&self.subject_publickey[..])?;
@@ -130,27 +131,21 @@ impl JournalEntry {
         Ok(())
     }
     pub fn partial_hash(&self) -> Digest {
-        let mut e = Encoder::new(Cursor::new(Vec::new()));
-        self.encode_unsigned_entry(&mut e).unwrap();
-        hash(&e.into_writer().into_inner())
+        hash(&unsafe_run_encoder(&|mut e| self.encode_unsigned_entry(&mut e)))
     }
     pub fn complete_hash(&self) -> Digest {
-        let mut e = Encoder::new(Cursor::new(Vec::new()));
-        self.encode_signed_entry(&mut e).unwrap();
-        hash(&e.into_writer().into_inner())
+        hash(&unsafe_run_encoder(&|mut e| self.encode_signed_entry(&mut e)))
     }
     pub fn advanced_hash(&self) -> Digest {
         self.complete_hash()
     }
     pub fn encode_as_cbor(&self) -> Vec<u8> {
-        let mut e = Encoder::new(Cursor::new(Vec::new()));
-        self.encode_signed_entry(&mut e).unwrap();
-        e.into_writer().into_inner()
+        unsafe_run_encoder(&|mut e| self.encode_signed_entry(&mut e))
     }
     pub fn new_from_cbor(d: &mut Decoder<Cursor<Vec<u8>>>) -> DecodeResult<JournalEntry> {
         Ok(JournalEntry {
             format_version: d.u32()?,
-            journal_id: d.u32()?,
+            journal_id: decode_uuid(d)?,
             history_hash: Digest(to_u8_32(&d.bytes()?[0..DIGESTBYTES]).unwrap()),
             extension_hash: Digest(to_u8_32(&d.bytes()?[0..DIGESTBYTES]).unwrap()),
             count: d.u32()?,
@@ -173,13 +168,14 @@ pub struct EntryExtension {
 impl EntryExtension {
     pub fn get_hash(&mut self) -> Digest {
         self.permanent_subject_publickeys.sort();
-        let mut e = Encoder::new(Cursor::new(Vec::new()));
-        e.u32(self.format_version).unwrap();
-        e.u32(self.permanent_count).unwrap();
-        for i in 0..self.permanent_subject_publickeys.len() {
-            e.bytes(&self.permanent_subject_publickeys[i][..]).unwrap();
-        }
-        hash(&e.into_writer().into_inner())
+        hash(&unsafe_run_encoder(&|e| {
+            e.u32(self.format_version)?;
+            e.u32(self.permanent_count)?;
+            for i in 0..self.permanent_subject_publickeys.len() {
+                e.bytes(&self.permanent_subject_publickeys[i][..])?;
+            }
+            Ok(())
+        }))
     }
     pub fn create_extension(&self, journal: &FullJournal) -> EntryExtension {
         let trusted_devices = journal.get_trusted_devices();

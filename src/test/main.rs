@@ -1,7 +1,10 @@
+extern crate uuid;
 extern crate sodiumoxide;
 extern crate cbor;
 
 extern crate morphingidentity;
+
+use uuid::Uuid;
 
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash;
@@ -25,13 +28,6 @@ macro_rules! random_u8 {
     () => (randombytes(1)[0])
 }
 
-macro_rules! random_u32 {
-    () => (u32::from(randombytes(1)[0]) << 24 |
-    u32::from(randombytes(1)[0]) << 16 |
-    u32::from(randombytes(1)[0]) << 8 |
-    u32::from(randombytes(1)[0]))
-}
-
 // This is the main function
 #[allow(dead_code)]
 fn main() {
@@ -39,7 +35,7 @@ fn main() {
 
     // Some tests
     let mut je: JournalEntry = JournalEntry::new(1,
-                                                 1,
+                                                 Uuid::nil(),
                                                  hash::sha256::hash(&[]),
                                                  0,
                                                  EntryType::Add,
@@ -58,8 +54,10 @@ fn main() {
 
     // ---------------   Example usage
 
-    // Create a new journal with journal ID 1000 and a first entry
-    let mut full_journal = FullJournal::new(1000, &issuer_pk, &issuer_sk).unwrap();
+    let id = Uuid::new_v4();
+
+    // Create a new journal with random journal ID and one entry
+    let mut full_journal = FullJournal::new(id, &issuer_pk, &issuer_sk).unwrap();
 
     // Check if the journal is valid
     assert!(full_journal.check_journal());
@@ -83,7 +81,7 @@ fn main() {
         .unwrap();
 
     // Test some properties of the new entry
-    assert_eq!(second_entry.journal_id, 1000);
+    assert_eq!(second_entry.journal_id, id);
     assert_eq!(second_entry.count, 1);
 
     // Test if the new entry can be added to the journal
@@ -187,7 +185,7 @@ fn fuzz_testing() {
         pub_keys.push(p_key);
     }
 
-    let mut rl = FullJournal::new(random_u32!(), &pub_keys[0], &sec_keys[0]).unwrap();
+    let mut rl = FullJournal::new(Uuid::new_v4(), &pub_keys[0], &sec_keys[0]).unwrap();
 
     for _i in 0..ITER - 1 {
         let trusted = rl.get_trusted_devices().clone();

@@ -7,3 +7,4 @@ pub mod utils;
 
 extern crate sodiumoxide;
 extern crate cbor;
+extern crate uuid;
