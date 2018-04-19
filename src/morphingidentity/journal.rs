@@ -1,5 +1,5 @@
 use entries::{DeviceType, EntryType, JournalEntry};
-use utils::{fmt_hex, run_decoder, unsafe_run_encoder};
+use utils::{fmt_hex, run_decoder, run_encoder};
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
@@ -148,7 +148,7 @@ impl FullJournal {
         false
     }
     pub fn encode_as_cbor(&self) -> Vec<u8> {
-        unsafe_run_encoder(&|mut e| {
+        run_encoder(&|mut e| {
             let num = self.entries.len();
             println!("Number of entries: {}", num);
             e.u32(FORMAT_JOURNAL_VERSION)?;
@@ -157,7 +157,7 @@ impl FullJournal {
                 self.entries[i].encode_signed_entry(&mut e)?;
             }
             Ok(())
-        })
+        }).unwrap()
     }
     pub fn new_from_cbor(bytes: Vec<u8>) -> DecodeResult<FullJournal> {
         run_decoder(bytes, &|mut d| {

@@ -50,13 +50,6 @@ pub fn run_encoder(enc: &Fn(&mut EncoderVec) -> EncodeResult) -> Result<Vec<u8>,
     enc(&mut e).and(Ok(e.into_writer().into_inner()))
 }
 
-/// Like `run_encoder`, but panics on errors. The existence of this function
-/// is justified because in most cases you can't actually ever get an error
-/// during encoding. Ideally we wouldn't need it, though.
-pub fn unsafe_run_encoder(enc: &Fn(&mut EncoderVec) -> EncodeResult) -> Vec<u8> {
-    run_encoder(enc).unwrap()
-}
-
 /// Run a CBOR decoder on a bytestring.
 pub fn run_decoder<T>(
     bytes: Vec<u8>,
@@ -85,7 +78,7 @@ mod tests {
     #[test]
     fn uuid_roundtrip() {
         let uuid = Uuid::new_v4();
-        let uuid_enc = unsafe_run_encoder(&|e| encode_uuid(uuid, e));
+        let uuid_enc = run_encoder(&|e| encode_uuid(uuid, e)).unwrap();
         let uuid_dec = run_decoder(uuid_enc, &|d| decode_uuid(d)).unwrap();
         assert_eq!(uuid, uuid_dec)
     }

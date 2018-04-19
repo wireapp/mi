@@ -7,7 +7,7 @@ use uuid::Uuid;
 use std::io::Cursor;
 use journal::FullJournal;
 
-use utils::{to_u8_32, to_u8_64, encode_uuid, decode_uuid, unsafe_run_encoder};
+use utils::{to_u8_32, to_u8_64, encode_uuid, decode_uuid, run_encoder};
 
 const FORMAT_ENTRY_VERSION: u32 = 1;
 
@@ -131,16 +131,16 @@ impl JournalEntry {
         Ok(())
     }
     pub fn partial_hash(&self) -> Digest {
-        hash(&unsafe_run_encoder(&|mut e| self.encode_unsigned_entry(&mut e)))
+        hash(&run_encoder(&|mut e| self.encode_unsigned_entry(&mut e)).unwrap())
     }
     pub fn complete_hash(&self) -> Digest {
-        hash(&unsafe_run_encoder(&|mut e| self.encode_signed_entry(&mut e)))
+        hash(&run_encoder(&|mut e| self.encode_signed_entry(&mut e)).unwrap())
     }
     pub fn advanced_hash(&self) -> Digest {
         self.complete_hash()
     }
     pub fn encode_as_cbor(&self) -> Vec<u8> {
-        unsafe_run_encoder(&|mut e| self.encode_signed_entry(&mut e))
+        run_encoder(&|mut e| self.encode_signed_entry(&mut e)).unwrap()
     }
     pub fn new_from_cbor(d: &mut Decoder<Cursor<Vec<u8>>>) -> DecodeResult<JournalEntry> {
         Ok(JournalEntry {
@@ -168,14 +168,14 @@ pub struct EntryExtension {
 impl EntryExtension {
     pub fn get_hash(&mut self) -> Digest {
         self.permanent_subject_publickeys.sort();
-        hash(&unsafe_run_encoder(&|e| {
+        hash(&run_encoder(&|e| {
             e.u32(self.format_version)?;
             e.u32(self.permanent_count)?;
             for i in 0..self.permanent_subject_publickeys.len() {
                 e.bytes(&self.permanent_subject_publickeys[i][..])?;
             }
             Ok(())
-        }))
+        }).unwrap())
     }
     pub fn create_extension(&self, journal: &FullJournal) -> EntryExtension {
         let trusted_devices = journal.get_trusted_devices();
