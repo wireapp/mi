@@ -1,0 +1,25 @@
+language: rust
+
+addons:
+  apt:
+    sources:
+      - sourceline: "ppa:chris-lea/libsodium"
+    packages:
+      - libsodium-dev
+
+rust:
+  - stable
+  - beta
+  - nightly
+
+matrix:
+  allow_failures:
+    - rust: nightly
+  fast_finish: true
+
+cache: cargo
+
+script:
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo run test
