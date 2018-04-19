@@ -1,5 +1,6 @@
 use entries::{DeviceType, EntryType, JournalEntry};
-use utils::{fmt_hex, run_decoder, run_encoder};
+use utils::fmt_hex;
+use cbor_utils::{run_decoder, run_encoder};
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;

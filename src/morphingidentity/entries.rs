@@ -7,7 +7,8 @@ use uuid::Uuid;
 use std::io::Cursor;
 use journal::FullJournal;
 
-use utils::{to_u8_32, to_u8_64, encode_uuid, decode_uuid, run_encoder};
+use utils::{to_u8_32, to_u8_64};
+use cbor_utils::{run_encoder, encode_uuid, decode_uuid};
 
 const FORMAT_ENTRY_VERSION: u32 = 1;
 
