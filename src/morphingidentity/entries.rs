@@ -4,7 +4,7 @@ use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, SIGNAT
                                          PUBLICKEYBYTES};
 use cbor::{Decoder, Encoder, EncodeResult, DecodeResult};
 use uuid::Uuid;
-use std::io::Cursor;
+use std::io::{Read, Write};
 use journal::FullJournal;
 
 use utils::{to_u8_32, to_u8_64};
@@ -113,7 +113,7 @@ impl JournalEntry {
     pub fn capability_cannot_be_removed(&self) -> bool {
         (self.capabilities & CapType::NonRemovableCap as u32) > 0
     }
-    pub fn encode_unsigned_entry(&self, e: &mut Encoder<Cursor<Vec<u8>>>) -> EncodeResult {
+    pub fn encode_unsigned_entry<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
         e.u32(self.format_version)?;
         encode_uuid(self.journal_id, e)?;
         e.bytes(&self.history_hash[..])?;
@@ -125,7 +125,7 @@ impl JournalEntry {
         e.bytes(&self.issuer_publickey[..])?;
         Ok(())
     }
-    pub fn encode_signed_entry(&self, e: &mut Encoder<Cursor<Vec<u8>>>) -> EncodeResult {
+    pub fn encode_signed_entry<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
         self.encode_unsigned_entry(e)?;
         e.bytes(&self.subject_signature[..])?;
         e.bytes(&self.issuer_signature[..])?;
@@ -143,7 +143,7 @@ impl JournalEntry {
     pub fn encode_as_cbor(&self) -> Vec<u8> {
         run_encoder(&|mut e| self.encode_signed_entry(&mut e)).unwrap()
     }
-    pub fn new_from_cbor(d: &mut Decoder<Cursor<Vec<u8>>>) -> DecodeResult<JournalEntry> {
+    pub fn new_from_cbor<R: Read>(d: &mut Decoder<R>) -> DecodeResult<JournalEntry> {
         Ok(JournalEntry {
             format_version: d.u32()?,
             journal_id: decode_uuid(d)?,
