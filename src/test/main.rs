@@ -191,7 +191,7 @@ fn fuzz_testing() {
         let trusted = rl.get_trusted_devices().clone();
         let mut issuer;
         let mut counter;
-        let mut iss_pk = &sign::ed25519::PublicKey::from_slice(&[0; sign::PUBLICKEYBYTES]).unwrap();
+        let mut iss_pk = &sign::ed25519::PublicKey([0; sign::PUBLICKEYBYTES]);
         let mut iss_sk;
         let mut sub_pk;
         let mut sub_sk;

@@ -1,18 +1,17 @@
 use sodiumoxide::crypto::sign;
-use sodiumoxide::crypto::hash::sha256::{hash, Digest, DIGESTBYTES};
-use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, SIGNATUREBYTES,
-                                         PUBLICKEYBYTES};
+use sodiumoxide::crypto::hash::sha256::{hash, Digest};
+use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, PUBLICKEYBYTES, SIGNATUREBYTES};
 use cbor::{Decoder, Encoder, EncodeResult, DecodeResult};
+use cbor::skip::Skip;
 use uuid::Uuid;
 use std::io::{Read, Write};
 use journal::FullJournal;
 
-use utils::{to_u8_32, to_u8_64};
-use cbor_utils::{run_encoder, encode_uuid, decode_uuid};
+use cbor_utils::{run_encoder, run_decoder};
 
 const FORMAT_ENTRY_VERSION: u32 = 1;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 #[repr(u32)]
 pub enum EntryType {
     Add = 1,
@@ -39,8 +38,7 @@ pub enum DeviceType {
     PermanentDevice = CapType::AddCap as u32 | CapType::RemoveCap as u32,
 }
 
-#[derive(Clone)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct JournalEntry {
     pub format_version: u32, // version of the data format of an entry
     pub journal_id: Uuid, // version of the current journal ID
@@ -55,6 +53,9 @@ pub struct JournalEntry {
     pub issuer_signature: Signature, // signature of the issuer
 }
 
+const EMPTYPUBLICKEY: PublicKey = PublicKey([0; PUBLICKEYBYTES]);
+const EMPTYSIGNATURE: Signature = Signature([0; SIGNATUREBYTES]);
+
 impl JournalEntry {
     pub fn new(format_version: u32,
                journal_id: Uuid,
@@ -63,8 +64,6 @@ impl JournalEntry {
                operation: EntryType,
                device_type: DeviceType)
                -> JournalEntry {
-        let empty_key = PublicKey::from_slice(&[0; sign::PUBLICKEYBYTES]).unwrap();
-        let empty_signature = Signature::from_slice(&[0; SIGNATUREBYTES]).unwrap();
         JournalEntry {
             format_version: format_version,
             journal_id: journal_id,
@@ -73,10 +72,10 @@ impl JournalEntry {
             count: count,
             operation: operation,
             capabilities: device_type as u32,
-            subject_publickey: empty_key,
-            issuer_publickey: empty_key,
-            subject_signature: empty_signature,
-            issuer_signature: empty_signature,
+            subject_publickey: EMPTYPUBLICKEY,
+            issuer_publickey: EMPTYPUBLICKEY,
+            subject_signature: EMPTYSIGNATURE,
+            issuer_signature: EMPTYSIGNATURE,
         }
     }
     pub fn set_identities(&mut self, subject_pk: &PublicKey, issuer_pk: &PublicKey) {
@@ -113,50 +112,83 @@ impl JournalEntry {
     pub fn capability_cannot_be_removed(&self) -> bool {
         (self.capabilities & CapType::NonRemovableCap as u32) > 0
     }
-    pub fn encode_unsigned_entry<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
-        e.u32(self.format_version)?;
-        encode_uuid(self.journal_id, e)?;
-        e.bytes(&self.history_hash[..])?;
-        e.bytes(&self.extension_hash[..])?;
-        e.u32(self.count)?;
-        e.u32(self.operation.clone() as u32)?;
-        e.u32(self.capabilities as u32)?;
-        e.bytes(&self.subject_publickey[..])?;
-        e.bytes(&self.issuer_publickey[..])?;
+    pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
+        e.object(11)?;
+        e.u8(0)?; e.u32(self.format_version)?;
+        e.u8(1)?; e.bytes(self.journal_id.as_bytes())?;
+        e.u8(2)?; e.bytes(&self.history_hash[..])?;
+        e.u8(3)?; e.bytes(&self.extension_hash[..])?;
+        e.u8(4)?; e.u32(self.count)?;
+        e.u8(5)?; e.u32(self.operation.clone() as u32)?;
+        e.u8(6)?; e.u32(self.capabilities as u32)?;
+        e.u8(7)?; e.bytes(&self.subject_publickey[..])?;
+        e.u8(8)?; e.bytes(&self.issuer_publickey[..])?;
+        e.u8(9)?; e.bytes(&self.subject_signature[..])?;
+        e.u8(10)?; e.bytes(&self.issuer_signature[..])?;
         Ok(())
     }
-    pub fn encode_signed_entry<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
-        self.encode_unsigned_entry(e)?;
-        e.bytes(&self.subject_signature[..])?;
-        e.bytes(&self.issuer_signature[..])?;
-        Ok(())
+    pub fn hash(&self) -> Digest {
+        hash(&self.as_bytes())
     }
+    /// Return a hash of the entry with signatures set to some default
+    /// values.
     pub fn partial_hash(&self) -> Digest {
-        hash(&run_encoder(&|mut e| self.encode_unsigned_entry(&mut e)).unwrap())
+        let partial = JournalEntry { 
+                subject_signature: EMPTYSIGNATURE,
+                issuer_signature: EMPTYSIGNATURE,
+                .. self.clone() };
+        hash(&partial.as_bytes())
     }
-    pub fn complete_hash(&self) -> Digest {
-        hash(&run_encoder(&|mut e| self.encode_signed_entry(&mut e)).unwrap())
-    }
-    pub fn advanced_hash(&self) -> Digest {
-        self.complete_hash()
-    }
-    pub fn encode_as_cbor(&self) -> Vec<u8> {
-        run_encoder(&|mut e| self.encode_signed_entry(&mut e)).unwrap()
-    }
-    pub fn new_from_cbor<R: Read>(d: &mut Decoder<R>) -> DecodeResult<JournalEntry> {
+    pub fn decode<R: Read + Skip>(d: &mut Decoder<R>) -> DecodeResult<JournalEntry> {
+        let n = d.object()?;
+        let mut format_version    = None;
+        let mut journal_id        = None;
+        let mut history_hash      = None;
+        let mut extension_hash    = None;
+        let mut count             = None;
+        let mut operation         = None;
+        let mut capabilities      = None;
+        let mut subject_publickey = None;
+        let mut issuer_publickey  = None;
+        let mut subject_signature = None;
+        let mut issuer_signature  = None;
+
+        use cbor_utils::*;
+        for _ in 0 .. n {
+            match d.u8()? {
+                0 => uniq!("JournalEntry::format_version", format_version, d.u32()?),
+                1 => uniq!("JournalEntry::journal_id", journal_id, decode_uuid(d)?),
+                2 => uniq!("JournalEntry::history_hash", history_hash, decode_hash(d)?),
+                3 => uniq!("JournalEntry::extension_hash", extension_hash, decode_hash(d)?),
+                4 => uniq!("JournalEntry::count", count, d.u32()?),
+                5 => uniq!("JournalEntry::operation", operation, EntryType::from_integer(d.u32()?)),
+                6 => uniq!("JournalEntry::capabilities", capabilities, d.u32()?),
+                7 => uniq!("JournalEntry::subject_publickey", subject_publickey, decode_publickey(d)?),
+                8 => uniq!("JournalEntry::issuer_publickey", issuer_publickey, decode_publickey(d)?),
+                9 => uniq!("JournalEntry::subject_signature", subject_signature, decode_signature(d)?),
+                10 => uniq!("JournalEntry::issuer_signature", issuer_signature, decode_signature(d)?),
+                _ => d.skip()?
+            }
+        }
         Ok(JournalEntry {
-            format_version: d.u32()?,
-            journal_id: decode_uuid(d)?,
-            history_hash: Digest(to_u8_32(&d.bytes()?[0..DIGESTBYTES]).unwrap()),
-            extension_hash: Digest(to_u8_32(&d.bytes()?[0..DIGESTBYTES]).unwrap()),
-            count: d.u32()?,
-            operation: EntryType::from_integer(d.u32()?),
-            capabilities: d.u32()?,
-            subject_publickey: PublicKey(to_u8_32(&d.bytes()?[0..PUBLICKEYBYTES]).unwrap()),
-            issuer_publickey: PublicKey(to_u8_32(&d.bytes()?[0..PUBLICKEYBYTES]).unwrap()),
-            subject_signature: Signature(to_u8_64(&d.bytes()?[0..SIGNATUREBYTES]).unwrap()),
-            issuer_signature: Signature(to_u8_64(&d.bytes()?[0..SIGNATUREBYTES]).unwrap()),
+            format_version:    to_field!(format_version, "JournalEntry::format_version"),
+            journal_id:        to_field!(journal_id, "JournalEntry::journal_id"),
+            history_hash:      to_field!(history_hash, "JournalEntry::history_hash"),
+            extension_hash:    to_field!(extension_hash, "JournalEntry::extension_hash"),
+            count:             to_field!(count, "JournalEntry::count"),
+            operation:         to_field!(operation, "JournalEntry::operation"),
+            capabilities:      to_field!(capabilities, "JournalEntry::capabilities"),
+            subject_publickey: to_field!(subject_publickey, "JournalEntry::subject_publickey"),
+            issuer_publickey:  to_field!(issuer_publickey, "JournalEntry::issuer_publickey"),
+            subject_signature: to_field!(subject_signature, "JournalEntry::subject_signature"),
+            issuer_signature:  to_field!(issuer_signature, "JournalEntry::issuer_signature"),
         })
+    }
+    pub fn as_bytes(&self) -> Vec<u8> {
+        run_encoder(&|mut e| self.encode(&mut e)).unwrap()
+    }
+    pub fn from_bytes(bs: Vec<u8>) -> DecodeResult<Self> {
+        run_decoder(bs, &|mut d| Self::decode(&mut d))
     }
 }
 
@@ -190,5 +222,41 @@ impl EntryExtension {
             permanent_count: permanent_devices.len() as u32,
             permanent_subject_publickeys: permanent_devices,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate rand;
+
+    use self::rand::random;
+    use super::*;
+
+    fn rand_bytes (n: usize) -> Vec<u8> {
+        (0..n).map(|_| random()).collect()
+    }
+    fn rand_publickey () -> PublicKey {
+        PublicKey::from_slice(rand_bytes(PUBLICKEYBYTES).as_slice()).unwrap()
+    }
+    fn rand_signature () -> Signature {
+        Signature::from_slice(rand_bytes(SIGNATUREBYTES).as_slice()).unwrap()
+    }
+
+    #[test]
+    fn journal_entry_roundtrip() {
+        let entry = JournalEntry {
+            format_version: FORMAT_ENTRY_VERSION,
+            journal_id: Uuid::new_v4(),
+            history_hash: hash(&random::<[u8; 4]>()),
+            extension_hash: hash(&random::<[u8; 4]>()),
+            count: random::<u32>(),
+            operation: EntryType::Add,
+            capabilities: random::<u32>(),
+            subject_publickey: rand_publickey(),
+            issuer_publickey: rand_publickey(),
+            subject_signature: rand_signature(),
+            issuer_signature: rand_signature(),
+        };
+        assert_eq!(entry, JournalEntry::from_bytes(entry.as_bytes()).unwrap())
     }
 }

@@ -83,7 +83,7 @@ impl FullJournal {
         }
         let mut le: JournalEntry = JournalEntry::new(FORMAT_ENTRY_VERSION,
                                                      self.journal_id,
-                                                     self.entries.last().unwrap().advanced_hash(),
+                                                     self.entries.last().unwrap().hash(),
                                                      self.version + 1,
                                                      operation,
                                                      device_type);
@@ -108,7 +108,7 @@ impl FullJournal {
            self.version >= (u32::max_value() - 1) ||
            le.format_version != FORMAT_ENTRY_VERSION ||
            le.journal_id != self.journal_id ||
-           self.entries.last().unwrap().advanced_hash()[..] != le.history_hash[..] ||
+           self.entries.last().unwrap().hash()[..] != le.history_hash[..] ||
            le.count != (self.version + 1) {
             return false;
         }
@@ -141,7 +141,7 @@ impl FullJournal {
             } else if le.operation == EntryType::Remove {
                 self.trusted_devices.remove(&le.subject_publickey);
             }
-            self.hash = self.entries.last().unwrap().advanced_hash();
+            self.hash = self.entries.last().unwrap().hash();
             self.version += 1;
             return true;
         }
@@ -155,7 +155,7 @@ impl FullJournal {
             e.u32(FORMAT_JOURNAL_VERSION)?;
             e.u32(num as u32)?;
             for i in 0..num {
-                self.entries[i].encode_signed_entry(&mut e)?;
+                self.entries[i].encode(&mut e)?;
             }
             Ok(())
         }).unwrap()
@@ -175,7 +175,7 @@ impl FullJournal {
             };
 
             if num >= 1 {
-                let first_entry = JournalEntry::new_from_cbor(&mut d)?;
+                let first_entry = JournalEntry::decode(&mut d)?;
                 if FullJournal::check_first_entry(&first_entry) {
                     let mut entries: Vec<JournalEntry> = Vec::new();
                     entries.push(first_entry.clone());
@@ -195,7 +195,7 @@ impl FullJournal {
 
             if num > 1 {
                 for _ in 1..num {
-                    let e = JournalEntry::new_from_cbor(&mut d)?;
+                    let e = JournalEntry::decode(&mut d)?;
                     journal.add_entry(e);
                 }
             }
@@ -234,7 +234,7 @@ impl FullJournal {
         for i in 1..(self.entries.len()) {
             let le = &self.entries[i];
             if le.journal_id != self.journal_id ||
-               self.entries[i - 1].advanced_hash()[..] != le.history_hash[..] ||
+               self.entries[i - 1].hash()[..] != le.history_hash[..] ||
                le.count != i as u32 {
                 if le.count != i as u32 {
                     println!("check_journal: count mismatch, should be {}, found {}",
@@ -242,12 +242,12 @@ impl FullJournal {
                              le.count);
                 } else if le.journal_id != self.journal_id {
                     println!("check_journal: ID mismatch");
-                } else if self.entries[i - 1].advanced_hash()[..] != le.history_hash[..] {
+                } else if self.entries[i - 1].hash()[..] != le.history_hash[..] {
                     println!("check_journal: hash mismatch, advanced hash from entry {} is \
                               different",
                              &self.entries[i - 1].count);
                     println!("check_journal: actual hash: {}",
-                             fmt_hex(&self.entries[i - 1].advanced_hash()[..]));
+                             fmt_hex(&self.entries[i - 1].hash()[..]));
                     println!("check_journal: advanced hash: {}",
                              fmt_hex(&le.history_hash[..]));
                 }
@@ -336,7 +336,7 @@ impl FullJournal {
         &self.entries[index]
     }
     pub fn get_permanent_hash(&self) -> Digest {
-        self.entries[0].complete_hash()
+        self.entries[0].hash()
     }
 }
 
@@ -354,7 +354,7 @@ impl ShortJournal {
         if self.trusted_devices.len() >= MAX_DEVICES || self.version >= (u32::max_value() - 1) ||
            le.format_version != FORMAT_ENTRY_VERSION ||
            le.journal_id != self.journal_id ||
-           self.entry.advanced_hash()[..] == le.history_hash[..] ||
+           self.entry.hash()[..] == le.history_hash[..] ||
            le.count != (self.version + 1) {
             return false;
         }
@@ -381,7 +381,7 @@ impl ShortJournal {
             } else if le.operation == EntryType::Remove {
                 self.trusted_devices.remove(&le.subject_publickey);
             }
-            self.hash = self.entry.advanced_hash();
+            self.hash = self.entry.hash();
             return true;
         }
         drop(le);
