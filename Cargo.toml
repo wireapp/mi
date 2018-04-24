@@ -5,18 +5,12 @@ authors = ["raph"]
 
 [dependencies]
 cbor-codec = ">= 0.7.1"
-
-[dependencies.uuid]
-version = ">= 0.6"
-features = ["v4"]
+uuid = "0.6"
 
 [dependencies.sodiumoxide]
 version = ">= 0.0.12"
 default-features = false
 features = ["std"]
-
-[dev-dependencies]
-rand = "0.4"
 
 [lib]
 name = "morphingidentity"

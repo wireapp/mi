@@ -227,35 +227,27 @@ impl EntryExtension {
 
 #[cfg(test)]
 mod tests {
-    extern crate rand;
-
-    use self::rand::random;
     use super::*;
 
-    fn rand_bytes (n: usize) -> Vec<u8> {
-        (0..n).map(|_| random()).collect()
-    }
-    fn rand_publickey () -> PublicKey {
-        PublicKey::from_slice(rand_bytes(PUBLICKEYBYTES).as_slice()).unwrap()
-    }
-    fn rand_signature () -> Signature {
-        Signature::from_slice(rand_bytes(SIGNATUREBYTES).as_slice()).unwrap()
-    }
+    use sodiumoxide;
+    use rand_utils::GoodRand;
 
     #[test]
     fn journal_entry_roundtrip() {
+        sodiumoxide::init();
+
         let entry = JournalEntry {
             format_version: FORMAT_ENTRY_VERSION,
-            journal_id: Uuid::new_v4(),
-            history_hash: hash(&random::<[u8; 4]>()),
-            extension_hash: hash(&random::<[u8; 4]>()),
-            count: random::<u32>(),
+            journal_id: GoodRand::rand(),
+            history_hash: GoodRand::rand(),
+            extension_hash: GoodRand::rand(),
+            count: GoodRand::rand(),
             operation: EntryType::Add,
-            capabilities: random::<u32>(),
-            subject_publickey: rand_publickey(),
-            issuer_publickey: rand_publickey(),
-            subject_signature: rand_signature(),
-            issuer_signature: rand_signature(),
+            capabilities: GoodRand::rand(),
+            subject_publickey: GoodRand::rand(),
+            issuer_publickey: GoodRand::rand(),
+            subject_signature: GoodRand::rand(),
+            issuer_signature: GoodRand::rand(),
         };
         assert_eq!(entry, JournalEntry::from_bytes(entry.as_bytes()).unwrap())
     }
