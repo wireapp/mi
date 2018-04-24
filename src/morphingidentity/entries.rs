@@ -236,19 +236,21 @@ mod tests {
     fn journal_entry_roundtrip() {
         sodiumoxide::init();
 
-        let entry = JournalEntry {
-            format_version: FORMAT_ENTRY_VERSION,
-            journal_id: GoodRand::rand(),
-            history_hash: GoodRand::rand(),
-            extension_hash: GoodRand::rand(),
-            count: GoodRand::rand(),
-            operation: EntryType::Add,
-            capabilities: GoodRand::rand(),
-            subject_publickey: GoodRand::rand(),
-            issuer_publickey: GoodRand::rand(),
-            subject_signature: GoodRand::rand(),
-            issuer_signature: GoodRand::rand(),
-        };
-        assert_eq!(entry, JournalEntry::from_bytes(entry.as_bytes()).unwrap())
+        for _ in 0..100 {
+            let entry = JournalEntry {
+                format_version: FORMAT_ENTRY_VERSION,
+                journal_id: GoodRand::rand(),
+                history_hash: GoodRand::rand(),
+                extension_hash: GoodRand::rand(),
+                count: GoodRand::rand(),
+                operation: EntryType::Add,
+                capabilities: GoodRand::rand(),
+                subject_publickey: GoodRand::rand(),
+                issuer_publickey: GoodRand::rand(),
+                subject_signature: GoodRand::rand(),
+                issuer_signature: GoodRand::rand(),
+            };
+            assert_eq!(entry, JournalEntry::from_bytes(entry.as_bytes()).unwrap())
+        }
     }
 }
