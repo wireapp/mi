@@ -8,24 +8,16 @@ use uuid::Uuid;
 
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash;
-use sodiumoxide::randombytes::randombytes;
 
 use morphingidentity::entries::{EntryType, JournalEntry, DeviceType};
 use morphingidentity::journal::FullJournal;
+
+use morphingidentity::rand_utils::GoodRand;
 
 const MAX_DEVICES: usize = 8;
 
 fn init() {
     sodiumoxide::init();
-}
-
-macro_rules! random_usize {
-    () => (randombytes(1)[0] as usize)
-}
-
-#[allow(unused_macros)]
-macro_rules! random_u8 {
-    () => (randombytes(1)[0])
 }
 
 // This is the main function
@@ -54,7 +46,7 @@ fn main() {
 
     // ---------------   Example usage
 
-    let id = Uuid::new_v4();
+    let id = GoodRand::rand();
 
     // Create a new journal with random journal ID and one entry
     let mut full_journal = FullJournal::new(id, &issuer_pk, &issuer_sk).unwrap();
@@ -185,19 +177,19 @@ fn fuzz_testing() {
         pub_keys.push(p_key);
     }
 
-    let mut rl = FullJournal::new(Uuid::new_v4(), &pub_keys[0], &sec_keys[0]).unwrap();
+    let mut rl = FullJournal::new(GoodRand::rand(), &pub_keys[0], &sec_keys[0]).unwrap();
 
     for _i in 0..ITER - 1 {
         let trusted = rl.get_trusted_devices().clone();
         let mut issuer;
         let mut counter;
-        let mut iss_pk = &sign::ed25519::PublicKey::from_slice(&[0; sign::PUBLICKEYBYTES]).unwrap();
+        let mut iss_pk = &sign::ed25519::PublicKey([0; sign::PUBLICKEYBYTES]);
         let mut iss_sk;
         let mut sub_pk;
         let mut sub_sk;
         let mut operation;
         loop {
-            let mut c = random_usize!() % (trusted.len() as usize);
+            let mut c = <usize as GoodRand>::rand() % (trusted.len() as usize);
             counter = 0;
             for e in trusted.values() {
                 issuer = e;
@@ -211,7 +203,7 @@ fn fuzz_testing() {
             let found_index = pub_keys.iter().enumerate().find(|&p| p.1[..] == iss_pk[..]).unwrap();
 
             iss_sk = &sec_keys[found_index.0];
-            c = random_usize!() % DEVICES;
+            c = <usize as GoodRand>::rand() % DEVICES;
             sub_sk = &sec_keys[c];
             sub_pk = &pub_keys[c];
 
