@@ -39,8 +39,7 @@ fn entry_test() {
             subject_signature: EMPTYSIGNATURE,
             capabilities: DeviceType::PermanentDevice as u32,
     };
-    let mut je = JournalEntry::new(1,
-                                   Uuid::nil(),
+    let mut je = JournalEntry::new(Uuid::nil(),
                                    hash::sha256::hash(&[]),
                                    0,
                                    operation,

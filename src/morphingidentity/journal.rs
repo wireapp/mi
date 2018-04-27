@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use cbor::DecodeResult;
 use uuid::Uuid;
 
-const FORMAT_ENTRY_VERSION: u32 = 0;
 const FORMAT_JOURNAL_VERSION: u32 = 0;
 const MAX_DEVICES: usize = 8;
 
@@ -47,8 +46,7 @@ impl FullJournal {
                 subject_signature: EMPTYSIGNATURE,
                 capabilities: DeviceType::PermanentDevice as u32,
             };
-        let mut entry = JournalEntry::new(FORMAT_ENTRY_VERSION,
-                                          _journal_id,
+        let mut entry = JournalEntry::new(_journal_id,
                                           hash(&[]),
                                           0,
                                           operation,
@@ -94,8 +92,7 @@ impl FullJournal {
             return None;
         }
         let last_entry = self.entries.last().unwrap();
-        let mut entry = JournalEntry::new(FORMAT_ENTRY_VERSION,
-                                          self.journal_id,
+        let mut entry = JournalEntry::new(self.journal_id,
                                           last_entry.hash(),
                                           last_entry.index + 1,
                                           operation,
@@ -111,7 +108,6 @@ impl FullJournal {
     pub fn can_add_entry(&self, entry: &JournalEntry) -> bool {
         let last_entry = self.entries.last().unwrap();
         if last_entry.index == u32::max_value() ||
-           entry.format_version != FORMAT_ENTRY_VERSION ||
            entry.journal_id != self.journal_id ||
            last_entry.hash()[..] != entry.history_hash[..] ||
            entry.index != (last_entry.index + 1) {
@@ -388,7 +384,6 @@ impl ShortJournal {
     pub fn new() {}
     pub fn test_entry(&self, le: &JournalEntry) -> bool {
         if self.trusted_devices.len() >= MAX_DEVICES || self.version >= (u32::max_value() - 1) ||
-           le.format_version != FORMAT_ENTRY_VERSION ||
            le.journal_id != self.journal_id ||
            self.entry.hash()[..] == le.history_hash[..] ||
            le.index != (self.version + 1) {

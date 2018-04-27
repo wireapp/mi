@@ -11,7 +11,7 @@ use journal::FullJournal;
 use utils::EMPTYSIGNATURE;
 use cbor_utils::{run_encoder, run_decoder};
 
-const FORMAT_ENTRY_VERSION: u32 = 1;
+pub const FORMAT_ENTRY_VERSION: u32 = 0;
 
 /// Specific operation done by an entry.
 #[derive(PartialEq, Clone, Debug)]
@@ -146,9 +146,6 @@ impl ClientInfo {
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct JournalEntry {
-    /// Version of entry format.
-    pub format_version: u32,
-
     /// Journal that the entry belongs to.
     pub journal_id: Uuid,
 
@@ -174,15 +171,13 @@ pub struct JournalEntry {
 }
 
 impl JournalEntry {
-    pub fn new(format_version: u32,
-               journal_id: Uuid,
+    pub fn new(journal_id: Uuid,
                history_hash: Digest,
                index: u32,
                operation: Operation,
                issuer: PublicKey )
                -> JournalEntry {
         JournalEntry {
-            format_version: format_version,
             journal_id: journal_id,
             history_hash: history_hash,
             extension_hash: hash(&[]),
@@ -210,7 +205,7 @@ impl JournalEntry {
     }
     pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
         e.object(8)?;
-        e.u8(0)?; e.u32(self.format_version)?;
+        e.u8(0)?; e.u32(FORMAT_ENTRY_VERSION)?;
         e.u8(1)?; e.bytes(self.journal_id.as_bytes())?;
         e.u8(2)?; e.bytes(&self.history_hash[..])?;
         e.u8(3)?; e.bytes(&self.extension_hash[..])?;
@@ -259,7 +254,7 @@ impl JournalEntry {
             let i = d.u8()?;
             let key = Key::u64(i as u64);
             match i {
-                0 => uniq!(key, "JournalEntry::format_version", format_version, d.u32()?),
+                0 => uniq!(key, "format version", format_version, d.u32()?),
                 1 => uniq!(key, "JournalEntry::journal_id", journal_id, decode_uuid(d)?),
                 2 => uniq!(key, "JournalEntry::history_hash", history_hash, decode_hash(d)?),
                 3 => uniq!(key, "JournalEntry::extension_hash", extension_hash, decode_hash(d)?),
@@ -270,8 +265,14 @@ impl JournalEntry {
                 _ => d.skip()?
             }
         }
+        let ver = to_field!(Key::u64(0), "format version", format_version);
+        if ver > FORMAT_ENTRY_VERSION {
+            return Err(MIDecodeError::UnsupportedEntryVersion {
+                found_version: ver,
+                max_supported_version: FORMAT_ENTRY_VERSION,
+            }.into());
+        }
         Ok(JournalEntry {
-            format_version: to_field!(Key::u64(0), "JournalEntry::format_version", format_version),
             journal_id:     to_field!(Key::u64(1), "JournalEntry::journal_id", journal_id),
             history_hash:   to_field!(Key::u64(2), "JournalEntry::history_hash", history_hash),
             extension_hash: to_field!(Key::u64(3), "JournalEntry::extension_hash", extension_hash),
@@ -349,7 +350,6 @@ mod tests {
 
         for _ in 0..100 {
             let entry = JournalEntry {
-                format_version: FORMAT_ENTRY_VERSION,
                 journal_id: GoodRand::rand(),
                 history_hash: GoodRand::rand(),
                 extension_hash: GoodRand::rand(),

@@ -37,13 +37,18 @@ pub fn run_decoder<T>(
 
 #[derive(Debug)]
 pub enum MIDecodeError {
-    /// Journal version is unsupported.
+    /// Journal format version is unsupported.
     UnsupportedJournalVersion {
         found_version: u32,
         max_supported_version: u32,
     },
     /// Journal is empty.
     EmptyJournal,
+    /// Entry format version is unsupported.
+    UnsupportedEntryVersion {
+        found_version: u32,
+        max_supported_version: u32,
+    },
     /// Unknown operation tag.
     UnknownOperation { found_tag: u32, max_known_tag: u32 },
     /// A value (represented as an array) has wrong number of elements.
@@ -82,6 +87,14 @@ impl fmt::Display for MIDecodeError {
                 found_version, max_supported_version
             ),
             MIDecodeError::EmptyJournal => write!(f, "Empty journal"),
+            MIDecodeError::UnsupportedEntryVersion {
+                found_version,
+                max_supported_version,
+            } => write!(
+                f,
+                "Unsupported entry version {} (max {} is supported)",
+                found_version, max_supported_version
+            ),
             MIDecodeError::UnknownOperation {
                 found_tag,
                 max_known_tag,
