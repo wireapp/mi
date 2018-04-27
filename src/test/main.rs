@@ -9,46 +9,64 @@ use uuid::Uuid;
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash;
 
-use morphingidentity::entries::{EntryType, JournalEntry, DeviceType};
+use morphingidentity::entries::{JournalEntry, DeviceType, Operation};
 use morphingidentity::journal::FullJournal;
 
+use morphingidentity::utils::EMPTYSIGNATURE;
 use morphingidentity::rand_utils::GoodRand;
 
 const MAX_DEVICES: usize = 8;
 
+/// This is the main function
+fn main() {
+    init();
+    entry_test();
+    entry_addition_test();
+    fuzz_testing();
+}
+
+/// Initialize crypto, etc.
 fn init() {
     sodiumoxide::init();
 }
 
-// This is the main function
-#[allow(dead_code)]
-fn main() {
-    init();
-
-    // Some tests
-    let mut je: JournalEntry = JournalEntry::new(1,
-                                                 Uuid::nil(),
-                                                 hash::sha256::hash(&[]),
-                                                 0,
-                                                 EntryType::Add,
-                                                 DeviceType::PermanentDevice);
+/// Test that an entry can be created and signed.
+fn entry_test() {
+    let (issuer_pk, issuer_sk) = sign::gen_keypair();
+    let (subject_pk, subject_sk) = sign::gen_keypair();
+    let operation = Operation::ClientAdd {
+            subject: subject_pk,
+            subject_signature: EMPTYSIGNATURE,
+            capabilities: DeviceType::PermanentDevice as u32,
+    };
+    let mut je = JournalEntry::new(1,
+                                   Uuid::nil(),
+                                   hash::sha256::hash(&[]),
+                                   0,
+                                   operation,
+                                   issuer_pk);
     assert_eq!(morphingidentity::utils::fmt_hex(&je.history_hash[..]),
                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
+    let issuer_signature = je.sign(&issuer_sk);
+    let subject_signature = je.sign(&subject_sk);
+    je.signature = issuer_signature;
+    je.operation.set_subject_signature(subject_signature);
+
+    assert!(je.verify_signature(&issuer_pk, &issuer_signature));
+    assert!(je.verify_signature(&subject_pk, &subject_signature));
+}
+
+/// Test that a journal can be created and an entry can be added to it.
+fn entry_addition_test() {
+    let id = GoodRand::rand();
+
+    // Generate keys for two devices: Issuer and Subject.
     let (issuer_pk, issuer_sk) = sign::gen_keypair();
     let (subject_pk, subject_sk) = sign::gen_keypair();
 
-    je.issuer_publickey = issuer_pk;
-    je.subject_publickey = subject_pk;
-
-    assert!(je.add_issuer_signature(&issuer_sk));
-    assert!(je.add_subject_signature(&subject_sk));
-
-    // ---------------   Example usage
-
-    let id = GoodRand::rand();
-
-    // Create a new journal with random journal ID and one entry
+    // Create a new journal with random journal ID and one entry self-signed
+    // by Issuer
     let mut full_journal = FullJournal::new(id, &issuer_pk, &issuer_sk).unwrap();
 
     // Check if the journal is valid
@@ -64,27 +82,32 @@ fn main() {
     println!("Journal history hash: {}",
              morphingidentity::utils::fmt_hex(&full_journal.get_journal_hash()[..]));
 
-    // Prepare a new entry by adding a device
-    let mut second_entry = full_journal.create_entry(EntryType::Add,
-                      DeviceType::PermanentDevice,
-                      &issuer_pk,
-                      &issuer_sk,
-                      &subject_pk)
-        .unwrap();
+    // Add a device (Subject) and do some tests /////////////////////////////
+
+    // Prepare the new entry
+    let second_operation = Operation::ClientAdd {
+            subject: subject_pk,
+            subject_signature: EMPTYSIGNATURE,
+            capabilities: DeviceType::PermanentDevice as u32,
+    };
+    let mut second_entry = full_journal.create_entry(
+                second_operation, &issuer_pk, &issuer_sk)
+            .unwrap();
 
     // Test some properties of the new entry
     assert_eq!(second_entry.journal_id, id);
-    assert_eq!(second_entry.count, 1);
+    assert_eq!(second_entry.index, 1);
 
-    // Test if the new entry can be added to the journal
+    // Test if the new entry can't be added to the journal
     // (the subject's signature is missing at this point)
-    assert!(!full_journal.test_entry(&second_entry));
+    assert!(!full_journal.can_add_entry(&second_entry));
 
     // Have the subject sign the new entry (only needed when adding a device)
-    assert!(full_journal.sign_entry_as_subject(&mut second_entry, &subject_sk));
+    let second_subject_signature = second_entry.sign(&subject_sk);
+    second_entry.operation.set_subject_signature(second_subject_signature);
 
     // Testing again now that the signature is there
-    assert!(full_journal.test_entry(&second_entry));
+    assert!(full_journal.can_add_entry(&second_entry));
 
     // Adding the new entry to the journal
     assert!(full_journal.add_entry(second_entry.clone()));
@@ -109,26 +132,25 @@ fn main() {
     for (pk, j) in full_journal.get_trusted_devices() {
         println!("Subject PublicKey: {}, Issuer PublicKey {}, count {}",
                  morphingidentity::utils::fmt_hex(&pk[..]),
-                 morphingidentity::utils::fmt_hex(&j.issuer_publickey[..]),
-                 j.count);
+                 morphingidentity::utils::fmt_hex(&j.entry.issuer[..]),
+                 j.entry.index);
     }
 
+    // Remove Subject and do more tests /////////////////////////////////////
+
     // Preparing a new entry to remove the second device
-    let mut third_entry = full_journal.create_entry(EntryType::Remove,
-                      DeviceType::PermanentDevice,
-                      &issuer_pk,
-                      &issuer_sk,
-                      &subject_pk)
+    let third_operation = Operation::ClientRemove {
+            subject: subject_pk,
+        };
+    let third_entry = full_journal.create_entry(
+            third_operation, &issuer_pk, &issuer_sk)
         .unwrap();
 
     // Checking count is correct
-    assert_eq!(third_entry.count, 2);
+    assert_eq!(third_entry.index, 2);
 
     // Checking the new entry can be added to the journal
-    assert!(full_journal.test_entry(&third_entry));
-
-    // Signing an entry of type 'Remove' as the subject makes no sense
-    assert!(!full_journal.sign_entry_as_subject(&mut third_entry, &subject_sk));
+    assert!(full_journal.can_add_entry(&third_entry));
 
     // Add the third entry to the journal
     assert!(full_journal.add_entry(third_entry.clone()));
@@ -150,18 +172,13 @@ fn main() {
     for (pk, j) in full_journal.get_trusted_devices() {
         println!("Subject PublicKey: {}, Issuer PublicKey {}, count {}",
                  morphingidentity::utils::fmt_hex(&pk[..]),
-                 morphingidentity::utils::fmt_hex(&j.issuer_publickey[..]),
-                 j.count);
+                 morphingidentity::utils::fmt_hex(&j.entry.issuer[..]),
+                 j.entry.index);
     }
-
-    fuzz_testing();
 }
 
+/// Build a long journal with random entries and do some fuzzing
 fn fuzz_testing() {
-
-    // -------------- Fuzzing
-    // Building a long journal with random entries to do some fuzzing
-
     println!("-------- Random journal ---------");
     println!("Generating {} entries", ITER);
 
@@ -183,17 +200,23 @@ fn fuzz_testing() {
         let trusted = rl.get_trusted_devices().clone();
         let mut issuer;
         let mut counter;
-        let mut iss_pk = &sign::ed25519::PublicKey([0; sign::PUBLICKEYBYTES]);
+        let mut iss_pk = &sign::PublicKey([0; sign::PUBLICKEYBYTES]);
         let mut iss_sk;
         let mut sub_pk;
         let mut sub_sk;
         let mut operation;
+
+        // Let's generate an entry that makes sense: either it's an entry
+        // that adds a device which isn't in journal yet (assuming that the
+        // journal isn't full), or it's an entry that removes a device which
+        // is in the journal already (assuming that the journal won't become
+        // empty).
         loop {
             let mut c = <usize as GoodRand>::rand() % (trusted.len() as usize);
             counter = 0;
             for e in trusted.values() {
                 issuer = e;
-                iss_pk = &issuer.subject_publickey;
+                iss_pk = &issuer.key;
                 if counter == c {
                     break;
                 }
@@ -207,32 +230,35 @@ fn fuzz_testing() {
             sub_sk = &sec_keys[c];
             sub_pk = &pub_keys[c];
 
-            if trusted.contains_key(sub_pk) {
-                operation = EntryType::Remove;
-            } else {
-                operation = EntryType::Add;
+            if trusted.contains_key(sub_pk) && trusted.len() > 1 {
+                operation = Operation::ClientRemove {
+                    subject: *sub_pk,
+                };
+                break;  // found it!
             }
-            if (operation == EntryType::Add && trusted.len() < MAX_DEVICES) ||
-               (operation == EntryType::Remove && trusted.len() > 1) {
-                break;
+            if !trusted.contains_key(sub_pk) && trusted.len() < MAX_DEVICES {
+                operation = Operation::ClientAdd {
+                    subject: *sub_pk,
+                    subject_signature: EMPTYSIGNATURE,
+                    capabilities: DeviceType::PermanentDevice as u32,
+                };
+                break;  // found it!
             }
+            // otherwise we restart the search
         }
 
         match rl.create_entry(operation.clone(),
-                              DeviceType::PermanentDevice,
                               iss_pk,
-                              iss_sk,
-                              sub_pk) {
+                              iss_sk) {
             None => {
                 println!("Couldn't create new entry. Number of trusted devices: {}",
                          trusted.len());
                 continue;
             }
             Some(mut new_entry) => {
-                if new_entry.operation == EntryType::Add {
-                    rl.sign_entry_as_subject(&mut new_entry, sub_sk);
-                }
-                assert!(rl.test_entry(&new_entry));
+                let subject_signature = new_entry.sign(sub_sk);
+                new_entry.operation.set_subject_signature(subject_signature);
+                assert!(rl.can_add_entry(&new_entry));
                 assert!(rl.add_entry(new_entry));
             }
         }
@@ -242,17 +268,17 @@ fn fuzz_testing() {
     for (pk, j) in &rl.get_trusted_devices() {
         println!("Trusted devices: Subject PublicKey: {}, Issuer PublicKey {}, count {}",
                  morphingidentity::utils::fmt_hex(&pk[..]),
-                 morphingidentity::utils::fmt_hex(&j.issuer_publickey[..]),
-                 j.count);
-        let mut pe = j;
+                 morphingidentity::utils::fmt_hex(&j.entry.issuer[..]),
+                 j.entry.index);
+        let mut pe = j.entry.clone();
         print!("Parent(s): ");
-        while let Some(x) = rl.get_parent(pe) {
-            pe = x;
-            if pe.count == 0 {
+        while let Some(x) = rl.get_parent(&pe) {
+            pe = (*x).clone();
+            if pe.index == 0 {
                 println!("root.");
                 break;
             } else {
-                print!("{}, ", pe.count);
+                print!("{}, ", pe.index);
             }
         }
         // loop {

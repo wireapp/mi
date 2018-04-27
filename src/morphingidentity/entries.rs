@@ -1,35 +1,115 @@
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
-use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature, PUBLICKEYBYTES, SIGNATUREBYTES};
+use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature};
 use cbor::{Decoder, Encoder, EncodeResult, DecodeResult};
+use cbor::value::Key;
 use cbor::skip::Skip;
 use uuid::Uuid;
 use std::io::{Read, Write};
-use journal::FullJournal;
 
+use journal::FullJournal;
+use utils::EMPTYSIGNATURE;
 use cbor_utils::{run_encoder, run_decoder};
 
 const FORMAT_ENTRY_VERSION: u32 = 1;
 
+/// Specific operation done by an entry.
 #[derive(PartialEq, Clone, Debug)]
-#[repr(u32)]
-pub enum EntryType {
-    Add = 1,
-    Remove = 0,
+pub enum Operation {
+
+    /// Add a new client to the journal.
+    ClientAdd {
+        /// Capabilities of the newly added client.
+        capabilities: u32,
+        /// Public key of the client that is being added.
+        subject: PublicKey,
+        /// A signature by the client.
+        subject_signature: Signature,
+    },
+
+    /// Remove a client from the journal.
+    ClientRemove {
+        /// Public key of the client that is being removed.
+        subject: PublicKey,
+    },
+
+    // NB. When adding new types, don't forget to update `rand_operation` in
+    // unit tests.
 }
-impl EntryType {
-    pub fn from_integer(x: u32) -> EntryType {
-        match x {
-            x if x == EntryType::Add as u32 => EntryType::Add,
-            x if x == EntryType::Remove as u32 => EntryType::Remove,
-            _ => EntryType::Remove,
+
+impl Operation {
+    pub fn set_subject_signature(&mut self, signature: Signature) {
+        match self {
+            &mut Operation::ClientAdd { ref mut subject_signature, .. } => {
+                *subject_signature = signature;
+            },
+            &mut Operation::ClientRemove { .. } => { },
+        }
+    }
+
+    pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
+        match *self {
+            Operation::ClientAdd { capabilities, subject, subject_signature } => {
+                e.array(4)?;
+                e.u32(0)?;                // tag 0
+                e.u32(capabilities)?;
+                e.bytes(&subject[..])?;
+                e.bytes(&subject_signature[..])?;
+                Ok(())
+            },
+            Operation::ClientRemove { subject } => {
+                e.array(2)?;
+                e.u32(1)?;                // tag 1
+                e.bytes(&subject[..])?;
+                Ok(())
+            },
+        }
+    }
+
+    pub fn decode<R: Read>(d: &mut Decoder<R>) -> DecodeResult<Operation> {
+        use cbor_utils::*;
+
+        let len = d.array()?;
+        let tag = d.u32()?;
+        match tag {
+            0 => {
+                if len != 4 {
+                    return Err(MIDecodeError::InvalidArrayLength {
+                        type_name: "Operation::ClientAdd", 
+                        expected_length: 4,
+                        actual_length: len,
+                    }.into());
+                }
+                Ok(Operation::ClientAdd {
+                    capabilities: d.u32()?,
+                    subject: decode_publickey(d)?,
+                    subject_signature: decode_signature(d)?,
+                })
+            },
+            1 => {
+                if len != 2 {
+                    return Err(MIDecodeError::InvalidArrayLength {
+                        type_name: "Operation::ClientRemove",
+                        expected_length: 2,
+                        actual_length: len,
+                    }.into());
+                }
+                Ok(Operation::ClientRemove {
+                    subject: decode_publickey(d)?,
+                })
+            },
+            _ => return Err(MIDecodeError::UnknownOperation {
+                found_tag: tag,
+                max_known_tag: 1,
+            }.into()),
         }
     }
 }
+
 #[repr(u32)]
 pub enum CapType {
-    AddCap = 0b01u32,
-    RemoveCap = 0b10u32,
+    AddCap          = 0b001u32,
+    RemoveCap       = 0b010u32,
     NonRemovableCap = 0b100u32,
 }
 #[repr(u32)]
@@ -38,93 +118,106 @@ pub enum DeviceType {
     PermanentDevice = CapType::AddCap as u32 | CapType::RemoveCap as u32,
 }
 
+/// Information about a trusted client.
 #[derive(PartialEq, Clone, Debug)]
-pub struct JournalEntry {
-    pub format_version: u32, // version of the data format of an entry
-    pub journal_id: Uuid, // version of the current journal ID
-    pub history_hash: Digest, // hash over previous versions
-    pub extension_hash: Digest, // hash over the entry extension
-    pub count: u32, // incremental version number, starts at 0
-    pub operation: EntryType, // delete = 0, add = 1
-    pub capabilities: u32, // capabilities
-    pub subject_publickey: PublicKey, // public key of the device that should be added/removed
-    pub issuer_publickey: PublicKey, // public key of the executing device
-    pub subject_signature: Signature, // signature of the subject
-    pub issuer_signature: Signature, // signature of the issuer
+pub struct ClientInfo {
+    /// Public key of the client.
+    pub key: PublicKey,
+    /// Capabilities of the client.
+    pub capabilities: u32,
+    /// Journal entry which was used to add the client.
+    pub entry: JournalEntry,
 }
 
-const EMPTYPUBLICKEY: PublicKey = PublicKey([0; PUBLICKEYBYTES]);
-const EMPTYSIGNATURE: Signature = Signature([0; SIGNATUREBYTES]);
+impl ClientInfo {
+    /// Can the client authorize addition of other clients?
+    pub fn capability_can_add(&self) -> bool {
+        (self.capabilities & CapType::AddCap as u32) > 0
+    }
+    /// Can the client authorize removal of other clients?
+    pub fn capability_can_remove(&self) -> bool {
+        (self.capabilities & CapType::RemoveCap as u32) > 0
+    }
+    /// Is it true that the client can not be removed from the journal?
+    pub fn capability_cannot_be_removed(&self) -> bool {
+        (self.capabilities & CapType::NonRemovableCap as u32) > 0
+    }
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct JournalEntry {
+    /// Version of entry format.
+    pub format_version: u32,
+
+    /// Journal that the entry belongs to.
+    pub journal_id: Uuid,
+
+    /// Hash over previous versions.
+    pub history_hash: Digest,
+
+    /// Hash over the entry extension.
+    pub extension_hash: Digest,
+
+    /// Entry index, starts at 0.
+    ///
+    /// Also called in some places: `count`, `version`.
+    pub index: u32,
+
+    /// Operation done by the entry.
+    pub operation: Operation,
+
+    /// Entry creator.
+    pub issuer: PublicKey,
+
+    /// Entry creator's signature.
+    pub signature: Signature,
+}
 
 impl JournalEntry {
     pub fn new(format_version: u32,
                journal_id: Uuid,
                history_hash: Digest,
-               count: u32,
-               operation: EntryType,
-               device_type: DeviceType)
+               index: u32,
+               operation: Operation,
+               issuer: PublicKey )
                -> JournalEntry {
         JournalEntry {
             format_version: format_version,
             journal_id: journal_id,
             history_hash: history_hash,
             extension_hash: hash(&[]),
-            count: count,
+            index: index,
             operation: operation,
-            capabilities: device_type as u32,
-            subject_publickey: EMPTYPUBLICKEY,
-            issuer_publickey: EMPTYPUBLICKEY,
-            subject_signature: EMPTYSIGNATURE,
-            issuer_signature: EMPTYSIGNATURE,
+            issuer: issuer,
+            signature: EMPTYSIGNATURE,
         }
     }
-    pub fn set_identities(&mut self, subject_pk: &PublicKey, issuer_pk: &PublicKey) {
-        self.subject_publickey = *subject_pk;
-        self.issuer_publickey = *issuer_pk;
+    /// Sign the entry with the given key.
+    ///
+    /// We always sign the `partial_hash` of the entry (which does not go
+    /// over any signatures contained in the entry).
+    pub fn sign(&self, key: &SecretKey) -> Signature {
+        sign::sign_detached(&self.partial_hash()[..], key)
     }
-    pub fn add_subject_signature(&mut self, secretkey: &SecretKey) -> bool {
-        if self.operation == EntryType::Remove {
-            return false;
-        }
-        self.subject_signature = sign::sign_detached(&self.partial_hash()[..], secretkey);
-        self.verify_subject_signature()
-    }
-    pub fn add_issuer_signature(&mut self, key: &SecretKey) -> bool {
-        self.issuer_signature = sign::sign_detached(&self.partial_hash()[..], key);
-        self.verify_issuer_signature()
-    }
-    pub fn verify_subject_signature(&self) -> bool {
-        sign::verify_detached(&self.subject_signature,
-                              self.partial_hash().as_ref(),
-                              &self.subject_publickey)
-    }
-    pub fn verify_issuer_signature(&self) -> bool {
-        sign::verify_detached(&self.issuer_signature,
-                              self.partial_hash().as_ref(),
-                              &self.issuer_publickey)
-    }
-    pub fn capability_can_add(&self) -> bool {
-        (self.capabilities & CapType::AddCap as u32) > 0
-    }
-    pub fn capability_can_remove(&self) -> bool {
-        (self.capabilities & CapType::RemoveCap as u32) > 0
-    }
-    pub fn capability_cannot_be_removed(&self) -> bool {
-        (self.capabilities & CapType::NonRemovableCap as u32) > 0
+    /// Verify some signature of the entry (e.g. issuer's signature or
+    /// subject's signature if present).
+    ///
+    /// Signatures are always verified against the `partial_hash` of the
+    /// entry – i.e. any signatures contained in the entry are not
+    /// considered parts of the signed message.
+    pub fn verify_signature(&self, signee: &PublicKey, signature: &Signature) -> bool {
+        sign::verify_detached(signature, self.partial_hash().as_ref(), signee)
     }
     pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
-        e.object(11)?;
+        e.object(8)?;
         e.u8(0)?; e.u32(self.format_version)?;
         e.u8(1)?; e.bytes(self.journal_id.as_bytes())?;
         e.u8(2)?; e.bytes(&self.history_hash[..])?;
         e.u8(3)?; e.bytes(&self.extension_hash[..])?;
-        e.u8(4)?; e.u32(self.count)?;
-        e.u8(5)?; e.u32(self.operation.clone() as u32)?;
-        e.u8(6)?; e.u32(self.capabilities as u32)?;
-        e.u8(7)?; e.bytes(&self.subject_publickey[..])?;
-        e.u8(8)?; e.bytes(&self.issuer_publickey[..])?;
-        e.u8(9)?; e.bytes(&self.subject_signature[..])?;
-        e.u8(10)?; e.bytes(&self.issuer_signature[..])?;
+        e.u8(4)?; e.u32(self.index)?;
+        e.u8(5)?; self.operation.encode(e)?;
+        e.u8(6)?; e.bytes(&self.issuer[..])?;
+        e.u8(7)?; e.bytes(&self.signature[..])?;
         Ok(())
     }
     pub fn hash(&self) -> Digest {
@@ -133,9 +226,20 @@ impl JournalEntry {
     /// Return a hash of the entry with signatures set to some default
     /// values.
     pub fn partial_hash(&self) -> Digest {
-        let partial = JournalEntry { 
-                subject_signature: EMPTYSIGNATURE,
-                issuer_signature: EMPTYSIGNATURE,
+        let partial = JournalEntry {
+                signature: EMPTYSIGNATURE,
+                operation: match (*self).operation {
+                    Operation::ClientAdd { subject, capabilities, subject_signature: _ } =>
+                        Operation::ClientAdd { 
+                            subject: subject,
+                            subject_signature: EMPTYSIGNATURE,
+                            capabilities: capabilities,
+                        },
+                    Operation::ClientRemove { subject } =>
+                        Operation::ClientRemove {
+                            subject: subject,
+                        },
+                },
                 .. self.clone() };
         hash(&partial.as_bytes())
     }
@@ -145,43 +249,36 @@ impl JournalEntry {
         let mut journal_id        = None;
         let mut history_hash      = None;
         let mut extension_hash    = None;
-        let mut count             = None;
+        let mut index             = None;
         let mut operation         = None;
-        let mut capabilities      = None;
-        let mut subject_publickey = None;
-        let mut issuer_publickey  = None;
-        let mut subject_signature = None;
-        let mut issuer_signature  = None;
+        let mut issuer            = None;
+        let mut signature         = None;
 
         use cbor_utils::*;
         for _ in 0 .. n {
-            match d.u8()? {
-                0 => uniq!("JournalEntry::format_version", format_version, d.u32()?),
-                1 => uniq!("JournalEntry::journal_id", journal_id, decode_uuid(d)?),
-                2 => uniq!("JournalEntry::history_hash", history_hash, decode_hash(d)?),
-                3 => uniq!("JournalEntry::extension_hash", extension_hash, decode_hash(d)?),
-                4 => uniq!("JournalEntry::count", count, d.u32()?),
-                5 => uniq!("JournalEntry::operation", operation, EntryType::from_integer(d.u32()?)),
-                6 => uniq!("JournalEntry::capabilities", capabilities, d.u32()?),
-                7 => uniq!("JournalEntry::subject_publickey", subject_publickey, decode_publickey(d)?),
-                8 => uniq!("JournalEntry::issuer_publickey", issuer_publickey, decode_publickey(d)?),
-                9 => uniq!("JournalEntry::subject_signature", subject_signature, decode_signature(d)?),
-                10 => uniq!("JournalEntry::issuer_signature", issuer_signature, decode_signature(d)?),
+            let i = d.u8()?;
+            let key = Key::u64(i as u64);
+            match i {
+                0 => uniq!(key, "JournalEntry::format_version", format_version, d.u32()?),
+                1 => uniq!(key, "JournalEntry::journal_id", journal_id, decode_uuid(d)?),
+                2 => uniq!(key, "JournalEntry::history_hash", history_hash, decode_hash(d)?),
+                3 => uniq!(key, "JournalEntry::extension_hash", extension_hash, decode_hash(d)?),
+                4 => uniq!(key, "JournalEntry::index", index, d.u32()?),
+                5 => uniq!(key, "JournalEntry::operation", operation, Operation::decode(d)?),
+                6 => uniq!(key, "JournalEntry::issuer", issuer, decode_publickey(d)?),
+                7 => uniq!(key, "JournalEntry::signature", signature, decode_signature(d)?),
                 _ => d.skip()?
             }
         }
         Ok(JournalEntry {
-            format_version:    to_field!(format_version, "JournalEntry::format_version"),
-            journal_id:        to_field!(journal_id, "JournalEntry::journal_id"),
-            history_hash:      to_field!(history_hash, "JournalEntry::history_hash"),
-            extension_hash:    to_field!(extension_hash, "JournalEntry::extension_hash"),
-            count:             to_field!(count, "JournalEntry::count"),
-            operation:         to_field!(operation, "JournalEntry::operation"),
-            capabilities:      to_field!(capabilities, "JournalEntry::capabilities"),
-            subject_publickey: to_field!(subject_publickey, "JournalEntry::subject_publickey"),
-            issuer_publickey:  to_field!(issuer_publickey, "JournalEntry::issuer_publickey"),
-            subject_signature: to_field!(subject_signature, "JournalEntry::subject_signature"),
-            issuer_signature:  to_field!(issuer_signature, "JournalEntry::issuer_signature"),
+            format_version: to_field!(Key::u64(0), "JournalEntry::format_version", format_version),
+            journal_id:     to_field!(Key::u64(1), "JournalEntry::journal_id", journal_id),
+            history_hash:   to_field!(Key::u64(2), "JournalEntry::history_hash", history_hash),
+            extension_hash: to_field!(Key::u64(3), "JournalEntry::extension_hash", extension_hash),
+            index:          to_field!(Key::u64(4), "JournalEntry::index", index),
+            operation:      to_field!(Key::u64(5), "JournalEntry::operation", operation),
+            issuer:         to_field!(Key::u64(6), "JournalEntry::issuer", issuer),
+            signature:      to_field!(Key::u64(7), "JournalEntry::signature", signature),
         })
     }
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -232,6 +329,20 @@ mod tests {
     use sodiumoxide;
     use rand_utils::GoodRand;
 
+    fn rand_operation() -> Operation {
+        match <u64 as GoodRand>::rand() % 2 {
+            0 => Operation::ClientAdd {
+                capabilities: GoodRand::rand(),
+                subject: GoodRand::rand(),
+                subject_signature: GoodRand::rand(),
+            },
+            1 => Operation::ClientRemove {
+                subject: GoodRand::rand(),
+            },
+            _ => panic!("after % 2 the number is definitely supposed to be less than 2"),
+        }
+    }
+
     #[test]
     fn journal_entry_roundtrip() {
         sodiumoxide::init();
@@ -242,13 +353,10 @@ mod tests {
                 journal_id: GoodRand::rand(),
                 history_hash: GoodRand::rand(),
                 extension_hash: GoodRand::rand(),
-                count: GoodRand::rand(),
-                operation: EntryType::Add,
-                capabilities: GoodRand::rand(),
-                subject_publickey: GoodRand::rand(),
-                issuer_publickey: GoodRand::rand(),
-                subject_signature: GoodRand::rand(),
-                issuer_signature: GoodRand::rand(),
+                index: GoodRand::rand(),
+                operation: rand_operation(),
+                issuer: GoodRand::rand(),
+                signature: GoodRand::rand(),
             };
             assert_eq!(entry, JournalEntry::from_bytes(entry.as_bytes()).unwrap())
         }

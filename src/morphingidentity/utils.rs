@@ -1,3 +1,5 @@
+use sodiumoxide::crypto::sign::{Signature, SIGNATUREBYTES};
+
 pub fn to_u8_32(buf: &[u8]) -> Option<[u8; 32]> {
     if buf.len() < 32 {
         return None;
@@ -30,3 +32,5 @@ pub fn fmt_hex(xs: &[u8]) -> String {
     }
     unsafe { String::from_utf8_unchecked(v) }
 }
+
+pub const EMPTYSIGNATURE: Signature = Signature([0; SIGNATUREBYTES]);
