@@ -204,15 +204,16 @@ impl JournalEntry {
         sign::verify_detached(signature, self.partial_hash().as_ref(), signee)
     }
     pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
-        e.object(8)?;
-        e.u8(0)?; e.u32(FORMAT_ENTRY_VERSION)?;
-        e.u8(1)?; e.bytes(self.journal_id.as_bytes())?;
-        e.u8(2)?; e.bytes(&self.history_hash[..])?;
-        e.u8(3)?; e.bytes(&self.extension_hash[..])?;
-        e.u8(4)?; e.u32(self.index)?;
-        e.u8(5)?; self.operation.encode(e)?;
-        e.u8(6)?; e.bytes(&self.issuer[..])?;
-        e.u8(7)?; e.bytes(&self.signature[..])?;
+        e.array(2)?;
+        e.u32(FORMAT_ENTRY_VERSION)?;
+        e.object(7)?;
+        e.u8(0)?; e.bytes(self.journal_id.as_bytes())?;
+        e.u8(1)?; e.bytes(&self.history_hash[..])?;
+        e.u8(2)?; e.bytes(&self.extension_hash[..])?;
+        e.u8(3)?; e.u32(self.index)?;
+        e.u8(4)?; self.operation.encode(e)?;
+        e.u8(5)?; e.bytes(&self.issuer[..])?;
+        e.u8(6)?; e.bytes(&self.signature[..])?;
         Ok(())
     }
     pub fn hash(&self) -> Digest {
@@ -239,8 +240,16 @@ impl JournalEntry {
         hash(&partial.as_bytes())
     }
     pub fn decode<R: Read + Skip>(d: &mut Decoder<R>) -> DecodeResult<JournalEntry> {
+        ensure_array_length(d, "JournalEntry", 2)?;
+        let format_version = d.u32()?;
+        if format_version > FORMAT_ENTRY_VERSION {
+            return Err(MIDecodeError::UnsupportedEntryVersion {
+                found_version: format_version,
+                max_supported_version: FORMAT_ENTRY_VERSION,
+            }.into());
+        }
+
         let n = d.object()?;
-        let mut format_version    = None;
         let mut journal_id        = None;
         let mut history_hash      = None;
         let mut extension_hash    = None;
@@ -254,32 +263,24 @@ impl JournalEntry {
             let i = d.u8()?;
             let key = Key::u64(i as u64);
             match i {
-                0 => uniq!(key, "format version", format_version, d.u32()?),
-                1 => uniq!(key, "JournalEntry::journal_id", journal_id, decode_uuid(d)?),
-                2 => uniq!(key, "JournalEntry::history_hash", history_hash, decode_hash(d)?),
-                3 => uniq!(key, "JournalEntry::extension_hash", extension_hash, decode_hash(d)?),
-                4 => uniq!(key, "JournalEntry::index", index, d.u32()?),
-                5 => uniq!(key, "JournalEntry::operation", operation, Operation::decode(d)?),
-                6 => uniq!(key, "JournalEntry::issuer", issuer, decode_publickey(d)?),
-                7 => uniq!(key, "JournalEntry::signature", signature, decode_signature(d)?),
+                0 => uniq!(key, "JournalEntry::journal_id", journal_id, decode_uuid(d)?),
+                1 => uniq!(key, "JournalEntry::history_hash", history_hash, decode_hash(d)?),
+                2 => uniq!(key, "JournalEntry::extension_hash", extension_hash, decode_hash(d)?),
+                3 => uniq!(key, "JournalEntry::index", index, d.u32()?),
+                4 => uniq!(key, "JournalEntry::operation", operation, Operation::decode(d)?),
+                5 => uniq!(key, "JournalEntry::issuer", issuer, decode_publickey(d)?),
+                6 => uniq!(key, "JournalEntry::signature", signature, decode_signature(d)?),
                 _ => d.skip()?
             }
         }
-        let ver = to_field!(Key::u64(0), "format version", format_version);
-        if ver > FORMAT_ENTRY_VERSION {
-            return Err(MIDecodeError::UnsupportedEntryVersion {
-                found_version: ver,
-                max_supported_version: FORMAT_ENTRY_VERSION,
-            }.into());
-        }
         Ok(JournalEntry {
-            journal_id:     to_field!(Key::u64(1), "JournalEntry::journal_id", journal_id),
-            history_hash:   to_field!(Key::u64(2), "JournalEntry::history_hash", history_hash),
-            extension_hash: to_field!(Key::u64(3), "JournalEntry::extension_hash", extension_hash),
-            index:          to_field!(Key::u64(4), "JournalEntry::index", index),
-            operation:      to_field!(Key::u64(5), "JournalEntry::operation", operation),
-            issuer:         to_field!(Key::u64(6), "JournalEntry::issuer", issuer),
-            signature:      to_field!(Key::u64(7), "JournalEntry::signature", signature),
+            journal_id:     to_field!(Key::u64(0), "JournalEntry::journal_id", journal_id),
+            history_hash:   to_field!(Key::u64(1), "JournalEntry::history_hash", history_hash),
+            extension_hash: to_field!(Key::u64(2), "JournalEntry::extension_hash", extension_hash),
+            index:          to_field!(Key::u64(3), "JournalEntry::index", index),
+            operation:      to_field!(Key::u64(4), "JournalEntry::operation", operation),
+            issuer:         to_field!(Key::u64(5), "JournalEntry::issuer", issuer),
+            signature:      to_field!(Key::u64(6), "JournalEntry::signature", signature),
         })
     }
     pub fn as_bytes(&self) -> Vec<u8> {

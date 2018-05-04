@@ -100,7 +100,7 @@ impl fmt::Display for MIDecodeError {
                 max_known_tag,
             } => write!(
                 f,
-                "Unknown tag {} when decoding an 'Operation' (max known is {})",
+                "Unknown 'Operation' type: {} (max known is {})",
                 found_tag, max_known_tag
             ),
             MIDecodeError::InvalidArrayLength {
@@ -136,6 +136,25 @@ impl Error for MIDecodeError {
     fn description(&self) -> &str {
         "MIDecodeError"
     }
+}
+
+// Decoding-related utilities //////////////////////////////////////////////
+
+/// Parse the header of an array which *has* to have a specific length.
+pub fn ensure_array_length<R: Read>(
+    d: &mut Decoder<R>,
+    type_name: &'static str,
+    expected_length: usize,
+) -> DecodeResult<()> {
+    let actual_length = d.array()?;
+    if actual_length != expected_length {
+        return Err(MIDecodeError::InvalidArrayLength {
+            type_name: type_name,
+            expected_length: expected_length,
+            actual_length: actual_length,
+        }.into());
+    };
+    Ok(())
 }
 
 // Decoders for various types //////////////////////////////////////////////

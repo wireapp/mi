@@ -1,6 +1,6 @@
 use entries::{DeviceType, Operation, JournalEntry, ClientInfo};
 use utils::{fmt_hex, EMPTYSIGNATURE};
-use cbor_utils::{run_decoder, run_encoder, MIDecodeError};
+use cbor_utils::{run_decoder, run_encoder, MIDecodeError, ensure_array_length};
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
@@ -175,14 +175,7 @@ impl FullJournal {
     }
     pub fn from_bytes(bytes: Vec<u8>) -> DecodeResult<FullJournal> {
         run_decoder(bytes, &|mut d| {
-            match d.array()? {
-                2 => { },
-                n => return Err(MIDecodeError::InvalidArrayLength {
-                    type_name: "FullJournal",
-                    expected_length: 2,
-                    actual_length: n,
-                }.into()),
-            }
+            ensure_array_length(d, "FullJournal", 2)?;
             let version = d.u32()?;
             if version > FORMAT_JOURNAL_VERSION {
                 return Err(MIDecodeError::UnsupportedJournalVersion {
