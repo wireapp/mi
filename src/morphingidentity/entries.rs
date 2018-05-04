@@ -33,9 +33,13 @@ pub enum Operation {
         subject: PublicKey,
     },
 
-    // NB. When adding new types, don't forget to update `rand_operation` in
-    // unit tests.
+    // NB. When adding new types, don't forget to:
+    //   * update `OPERATIONS`
+    //   * update `rand_operation` in unit tests
 }
+
+/// Number of different operations that we have currently.
+pub const OPERATIONS: u32 = 2;
 
 impl Operation {
     pub fn set_subject_signature(&mut self, signature: Signature) {
@@ -100,7 +104,7 @@ impl Operation {
             },
             _ => return Err(MIDecodeError::UnknownOperation {
                 found_tag: tag,
-                max_known_tag: 1,
+                max_known_tag: OPERATIONS - 1,
             }.into()),
         }
     }
@@ -332,7 +336,7 @@ mod tests {
     use rand_utils::GoodRand;
 
     fn rand_operation() -> Operation {
-        match <u64 as GoodRand>::rand() % 2 {
+        match <u32 as GoodRand>::rand() % OPERATIONS {
             0 => Operation::ClientAdd {
                 capabilities: GoodRand::rand(),
                 subject: GoodRand::rand(),
@@ -341,7 +345,7 @@ mod tests {
             1 => Operation::ClientRemove {
                 subject: GoodRand::rand(),
             },
-            _ => panic!("after % 2 the number is definitely supposed to be less than 2"),
+            _ => unreachable!(),
         }
     }
 
