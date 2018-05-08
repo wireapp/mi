@@ -6,6 +6,7 @@ use uuid::Uuid;
 use cbor::Config;
 use cbor::decoder::{DecodeError, DecodeResult, Decoder};
 use cbor::encoder::{EncodeError, EncodeResult, Encoder};
+use cbor::value::Key;
 use sodiumoxide::crypto::sign::{PublicKey, Signature, PUBLICKEYBYTES,
                                 SIGNATUREBYTES};
 use sodiumoxide::crypto::hash::sha256;
@@ -36,17 +37,36 @@ pub fn run_decoder<T>(
 
 #[derive(Debug)]
 pub enum MIDecodeError {
-    /// A value (represented as an array) had wrong number of elements. The
-    /// error provides: value's type, expected array size, actual array
-    /// size.
-    InvalidArrayLen(&'static str, usize, usize),
-    /// A field was expected in a map, but was not found. The error
-    /// provides: field's descriptive name (even if the key for the field is
-    /// not a string but e.g. an integer).
-    MissingField(&'static str),
-    /// A field was encountered twice in a map. The error provides: field's
-    /// descriptive name.
-    DuplicateField(&'static str),
+    /// Journal format version is unsupported.
+    UnsupportedJournalVersion {
+        found_version: u32,
+        max_supported_version: u32,
+    },
+    /// Journal is empty.
+    EmptyJournal,
+    /// Entry format version is unsupported.
+    UnsupportedEntryVersion {
+        found_version: u32,
+        max_supported_version: u32,
+    },
+    /// Unknown operation tag.
+    UnknownOperation { found_tag: u32, max_known_tag: u32 },
+    /// A value (represented as an array) has wrong number of elements.
+    InvalidArrayLength {
+        type_name: &'static str,
+        expected_length: usize,
+        actual_length: usize,
+    },
+    /// A field was expected in a map, but was not found.
+    MissingField {
+        field_name: &'static str,
+        field_key: Key,
+    },
+    /// A field was encountered twice in a map.
+    DuplicateField {
+        field_name: &'static str,
+        field_key: Key,
+    },
 }
 
 impl From<MIDecodeError> for DecodeError {
@@ -58,17 +78,56 @@ impl From<MIDecodeError> for DecodeError {
 impl fmt::Display for MIDecodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match *self {
-            MIDecodeError::InvalidArrayLen(t, e, a) => write!(
+            MIDecodeError::UnsupportedJournalVersion {
+                found_version,
+                max_supported_version,
+            } => write!(
+                f,
+                "Unsupported journal version {} (max {} is supported)",
+                found_version, max_supported_version
+            ),
+            MIDecodeError::EmptyJournal => write!(f, "Empty journal"),
+            MIDecodeError::UnsupportedEntryVersion {
+                found_version,
+                max_supported_version,
+            } => write!(
+                f,
+                "Unsupported entry version {} (max {} is supported)",
+                found_version, max_supported_version
+            ),
+            MIDecodeError::UnknownOperation {
+                found_tag,
+                max_known_tag,
+            } => write!(
+                f,
+                "Unknown 'Operation' type: {} (max known is {})",
+                found_tag, max_known_tag
+            ),
+            MIDecodeError::InvalidArrayLength {
+                type_name,
+                expected_length,
+                actual_length,
+            } => write!(
                 f,
                 "Wrong length ({}): expected array of length {}, got {}",
-                t, e, a
+                type_name, expected_length, actual_length
             ),
-            MIDecodeError::MissingField(ref s) => {
-                write!(f, "Missing field: {}", s)
-            }
-            MIDecodeError::DuplicateField(ref s) => {
-                write!(f, "Duplicate field: {}", s)
-            }
+            MIDecodeError::MissingField {
+                field_name,
+                ref field_key,
+            } => write!(
+                f,
+                "Missing field: {} (key {:?})",
+                field_name, field_key
+            ),
+            MIDecodeError::DuplicateField {
+                field_name,
+                ref field_key,
+            } => write!(
+                f,
+                "Duplicate field: {} (key {:?})",
+                field_name, field_key
+            ),
         }
     }
 }
@@ -79,12 +138,35 @@ impl Error for MIDecodeError {
     }
 }
 
+// Decoding-related utilities //////////////////////////////////////////////
+
+/// Parse the header of an array which *has* to have a specific length.
+pub fn ensure_array_length<R: Read>(
+    d: &mut Decoder<R>,
+    type_name: &'static str,
+    expected_length: usize,
+) -> DecodeResult<()> {
+    let actual_length = d.array()?;
+    if actual_length != expected_length {
+        return Err(MIDecodeError::InvalidArrayLength {
+            type_name: type_name,
+            expected_length: expected_length,
+            actual_length: actual_length,
+        }.into());
+    };
+    Ok(())
+}
+
 // Decoders for various types //////////////////////////////////////////////
 
 pub fn decode_uuid<R: Read>(d: &mut Decoder<R>) -> DecodeResult<Uuid> {
     let b = &d.bytes()?;
     Uuid::from_bytes(b).map_err(|_err| {
-        MIDecodeError::InvalidArrayLen("Uuid", 16, b.len()).into()
+        MIDecodeError::InvalidArrayLength {
+            type_name: "Uuid",
+            expected_length: 16,
+            actual_length: b.len(),
+        }.into()
     })
 }
 
@@ -93,8 +175,11 @@ pub fn decode_publickey<R: Read>(
 ) -> DecodeResult<PublicKey> {
     let b = &d.bytes()?;
     PublicKey::from_slice(b).ok_or_else(|| {
-        MIDecodeError::InvalidArrayLen("PublicKey", PUBLICKEYBYTES, b.len())
-            .into()
+        MIDecodeError::InvalidArrayLength {
+            type_name: "PublicKey",
+            expected_length: PUBLICKEYBYTES,
+            actual_length: b.len(),
+        }.into()
     })
 }
 
@@ -103,8 +188,11 @@ pub fn decode_signature<R: Read>(
 ) -> DecodeResult<Signature> {
     let b = &d.bytes()?;
     Signature::from_slice(b).ok_or_else(|| {
-        MIDecodeError::InvalidArrayLen("Signature", SIGNATUREBYTES, b.len())
-            .into()
+        MIDecodeError::InvalidArrayLength {
+            type_name: "Signature",
+            expected_length: SIGNATUREBYTES,
+            actual_length: b.len(),
+        }.into()
     })
 }
 
@@ -113,31 +201,37 @@ pub fn decode_hash<R: Read>(
 ) -> DecodeResult<sha256::Digest> {
     let b = &d.bytes()?;
     sha256::Digest::from_slice(b).ok_or_else(|| {
-        MIDecodeError::InvalidArrayLen(
-            "sha256::Digest",
-            sha256::DIGESTBYTES,
-            b.len(),
-        ).into()
+        MIDecodeError::InvalidArrayLength {
+            type_name: "sha256::Digest",
+            expected_length: sha256::DIGESTBYTES,
+            actual_length: b.len(),
+        }.into()
     })
 }
 
 // Helper macros (copied from proteus/internal/util.rs) ////////////////////
 
 macro_rules! to_field {
-    ($test: expr, $msg: expr) => {
-        match $test {
+    ($key: expr, $field: expr, $var: expr) => {
+        match $var {
             Some(val) => val,
-            None => return Err(MIDecodeError::MissingField($msg).into())
+            None => return Err(MIDecodeError::MissingField {
+                field_name: $field,
+                field_key: $key,
+            }.into())
         }
     }
 }
 
 macro_rules! uniq {
-    ($msg: expr, $name: ident, $action: expr) => {
-        if $name.is_some() {
-            return Err(MIDecodeError::DuplicateField($msg).into())
+    ($key: expr, $field: expr, $var: ident, $decode_action: expr) => {
+        if $var.is_some() {
+            return Err(MIDecodeError::DuplicateField {
+                field_name: $field,
+                field_key: $key,
+            }.into())
         } else {
-            $name = Some($action)
+            $var = Some($decode_action)
         }
     }
 }

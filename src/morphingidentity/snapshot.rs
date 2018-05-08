@@ -14,7 +14,7 @@ pub struct Snapshot {
     /// Journal ID
     pub journal_id: u32,
     /// Index of the latest entry
-    pub count: u32,
+    pub index: u32,
     /// Complete hash of the latest entry (computed as taking the hash of the bytestring
     /// that the entry encodes to)
     pub advanced_hash: Digest,
