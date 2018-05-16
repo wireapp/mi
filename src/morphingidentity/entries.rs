@@ -33,13 +33,25 @@ pub enum Operation {
         subject: PublicKey,
     },
 
+    /// Atomically remove one and add another client.
+    ClientReplace {
+        /// Public key of the client that is being removed.
+        removee: PublicKey,
+        /// Capabilities of the newly added client.
+        capabilities: u32,
+        /// Public key of the client that is being added.
+        addee: PublicKey,
+        /// A signature by the client.
+        addee_signature: Signature,
+    },
+
     // NB. When adding new types, don't forget to:
     //   * update `OPERATIONS`
     //   * update `rand_operation` in unit tests
 }
 
 /// Number of different operations that we have currently.
-pub const OPERATIONS: u32 = 2;
+pub const OPERATIONS: u32 = 3;
 
 impl Operation {
     pub fn set_subject_signature(&mut self, signature: Signature) {
@@ -48,6 +60,9 @@ impl Operation {
                 *subject_signature = signature;
             },
             &mut Operation::ClientRemove { .. } => { },
+            &mut Operation::ClientReplace { ref mut addee_signature, .. } => {
+                *addee_signature = signature;
+            },
         }
     }
 
@@ -67,6 +82,15 @@ impl Operation {
                 e.bytes(&subject[..])?;
                 Ok(())
             },
+            Operation::ClientReplace { removee, capabilities, addee, addee_signature } => {
+                e.array(5)?;
+                e.u32(2)?;                // tag 2
+                e.bytes(&removee[..])?;
+                e.u32(capabilities)?;
+                e.bytes(&addee[..])?;
+                e.bytes(&addee_signature[..])?;
+                Ok(())
+            },
         }
     }
 
@@ -79,7 +103,7 @@ impl Operation {
             0 => {
                 if len != 4 {
                     return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::ClientAdd", 
+                        type_name: "Operation::ClientAdd",
                         expected_length: 4,
                         actual_length: len,
                     }.into());
@@ -100,6 +124,21 @@ impl Operation {
                 }
                 Ok(Operation::ClientRemove {
                     subject: decode_publickey(d)?,
+                })
+            },
+            2 => {
+                if len != 5 {
+                    return Err(MIDecodeError::InvalidArrayLength {
+                        type_name: "Operation::ClientReplace",
+                        expected_length: 5,
+                        actual_length: len,
+                    }.into());
+                }
+                Ok(Operation::ClientReplace {
+                    removee: decode_publickey(d)?,
+                    capabilities: d.u32()?,
+                    addee: decode_publickey(d)?,
+                    addee_signature: decode_signature(d)?,
                 })
             },
             _ => return Err(MIDecodeError::UnknownOperation {
@@ -230,7 +269,9 @@ impl JournalEntry {
                 signature: EMPTYSIGNATURE,
                 operation: match (*self).operation {
                     Operation::ClientAdd { subject, capabilities, subject_signature: _ } =>
-                        Operation::ClientAdd { 
+                    // underscore to indicate "will not use".
+                    // TODO: there is a nicer way to do this grep above in this file for 'ref mut'.
+                        Operation::ClientAdd {
                             subject: subject,
                             subject_signature: EMPTYSIGNATURE,
                             capabilities: capabilities,
@@ -238,6 +279,13 @@ impl JournalEntry {
                     Operation::ClientRemove { subject } =>
                         Operation::ClientRemove {
                             subject: subject,
+                        },
+                    Operation::ClientReplace { removee, capabilities, addee, addee_signature: _ } =>
+                        Operation::ClientReplace {
+                            removee: removee,
+                            capabilities: capabilities,
+                            addee: addee,
+                            addee_signature: EMPTYSIGNATURE
                         },
                 },
                 .. self.clone() };
@@ -344,6 +392,12 @@ mod tests {
             },
             1 => Operation::ClientRemove {
                 subject: GoodRand::rand(),
+            },
+            2 => Operation::ClientReplace {
+                removee: GoodRand::rand(),
+                capabilities: GoodRand::rand(),
+                addee: GoodRand::rand(),
+                addee_signature: GoodRand::rand(),
             },
             _ => unreachable!(),
         }
