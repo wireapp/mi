@@ -23,3 +23,7 @@ script:
   - cargo build --verbose
   - cargo test --verbose
   - cargo run test
+
+notifications:  # see https://docs.travis-ci.com/user/notifications
+  email: false
+
