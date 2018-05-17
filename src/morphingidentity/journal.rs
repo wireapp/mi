@@ -90,8 +90,9 @@ impl FullJournal {
                 if devices < 2 { return None };
                 if !self.trusted_devices.contains_key(&subject) { return None };
             },
-            Operation::ClientReplace { removee, .. } => {
+            Operation::ClientReplace { removee, addee, .. } => {
                 if !self.trusted_devices.contains_key(&removee) { return None };
+                if self.trusted_devices.contains_key(&addee) { return None };
             },
         }
         if self.entries.len() >= u32::max_value() as usize || self.entries.is_empty() ||
@@ -160,6 +161,7 @@ impl FullJournal {
                     None         => false,
                 };
                 issuer_can_replace && removee_is_removable &&
+                  !self.trusted_devices.contains_key(&addee) &&
                   entry.verify_signature(&entry.issuer, &entry.signature) &&
                   entry.verify_signature(&addee, &addee_signature)
             },
