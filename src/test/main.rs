@@ -234,7 +234,7 @@ fn fuzz_testing() {
             sub_sk = &sec_keys[c];
             sub_pk = &pub_keys[c];
 
-            if (<usize as GoodRand>::rand() % 3) == 0 &&
+            if (<usize as GoodRand>::rand() % 3) == 0 &&              // TODO: use OPERATIONS instead of 3
                 trusted.contains_key(sub_pk) && trusted.len() > 1 &&  // TODO: should be `trusted.len() >= 1`!
                 trusted.len() < MAX_DEVICES {
                 loop {
