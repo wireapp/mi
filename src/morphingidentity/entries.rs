@@ -36,13 +36,13 @@ pub enum Operation {
     /// Atomically remove one and add another client.
     ClientReplace {
         /// Public key of the client that is being removed.
-        removee: PublicKey,
+        removed_subject: PublicKey,
         /// Capabilities of the newly added client.
         capabilities: u32,
         /// Public key of the client that is being added.
-        addee: PublicKey,
+        added_subject: PublicKey,
         /// A signature by the client.
-        addee_signature: Signature,
+        added_subject_signature: Signature,
     },
 
     // NB. When adding new types, don't forget to:
@@ -60,8 +60,8 @@ impl Operation {
                 *subject_signature = signature;
             },
             &mut Operation::ClientRemove { .. } => { },
-            &mut Operation::ClientReplace { ref mut addee_signature, .. } => {
-                *addee_signature = signature;
+            &mut Operation::ClientReplace { ref mut added_subject_signature, .. } => {
+                *added_subject_signature = signature;
             },
         }
     }
@@ -82,13 +82,13 @@ impl Operation {
                 e.bytes(&subject[..])?;
                 Ok(())
             },
-            Operation::ClientReplace { removee, capabilities, addee, addee_signature } => {
+            Operation::ClientReplace { removed_subject, capabilities, added_subject, added_subject_signature } => {
                 e.array(5)?;
                 e.u32(2)?;                // tag 2
-                e.bytes(&removee[..])?;
+                e.bytes(&removed_subject[..])?;
                 e.u32(capabilities)?;
-                e.bytes(&addee[..])?;
-                e.bytes(&addee_signature[..])?;
+                e.bytes(&added_subject[..])?;
+                e.bytes(&added_subject_signature[..])?;
                 Ok(())
             },
         }
@@ -135,10 +135,10 @@ impl Operation {
                     }.into());
                 }
                 Ok(Operation::ClientReplace {
-                    removee: decode_publickey(d)?,
+                    removed_subject: decode_publickey(d)?,
                     capabilities: d.u32()?,
-                    addee: decode_publickey(d)?,
-                    addee_signature: decode_signature(d)?,
+                    added_subject: decode_publickey(d)?,
+                    added_subject_signature: decode_signature(d)?,
                 })
             },
             _ => return Err(MIDecodeError::UnknownOperation {
@@ -280,12 +280,12 @@ impl JournalEntry {
                         Operation::ClientRemove {
                             subject: subject,
                         },
-                    Operation::ClientReplace { removee, capabilities, addee, addee_signature: _ } =>
+                    Operation::ClientReplace { removed_subject, capabilities, added_subject, added_subject_signature: _ } =>
                         Operation::ClientReplace {
-                            removee: removee,
+                            removed_subject: removed_subject,
                             capabilities: capabilities,
-                            addee: addee,
-                            addee_signature: EMPTYSIGNATURE
+                            added_subject: added_subject,
+                            added_subject_signature: EMPTYSIGNATURE
                         },
                 },
                 .. self.clone() };
@@ -394,10 +394,10 @@ mod tests {
                 subject: GoodRand::rand(),
             },
             2 => Operation::ClientReplace {
-                removee: GoodRand::rand(),
+                removed_subject: GoodRand::rand(),
                 capabilities: GoodRand::rand(),
-                addee: GoodRand::rand(),
-                addee_signature: GoodRand::rand(),
+                added_subject: GoodRand::rand(),
+                added_subject_signature: GoodRand::rand(),
             },
             _ => unreachable!(),
         }

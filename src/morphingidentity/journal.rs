@@ -90,9 +90,9 @@ impl FullJournal {
                 if devices < 2 { return None };
                 if !self.trusted_devices.contains_key(&subject) { return None };
             },
-            Operation::ClientReplace { removee, addee, .. } => {
-                if !self.trusted_devices.contains_key(&removee) { return None };
-                if self.trusted_devices.contains_key(&addee) { return None };
+            Operation::ClientReplace { removed_subject, added_subject, .. } => {
+                if !self.trusted_devices.contains_key(&removed_subject) { return None };
+                if self.trusted_devices.contains_key(&added_subject) { return None };
             },
         }
         if self.entries.len() >= u32::max_value() as usize || self.entries.is_empty() ||
@@ -151,19 +151,19 @@ impl FullJournal {
                 issuer_can_remove && subject_is_removable &&
                   entry.verify_signature(&entry.issuer, &entry.signature)
             },
-            Operation::ClientReplace { removee, addee, addee_signature, .. } => {
+            Operation::ClientReplace { removed_subject, added_subject, added_subject_signature, .. } => {
                 let issuer_can_replace = match self.get_trusted_device(&entry.issuer) {
                     Some(client) => client.capability_can_remove() && client.capability_can_add(),
                     None         => false,
                 };
-                let removee_is_removable = match self.get_trusted_device(&removee) {
+                let removed_subject_is_removable = match self.get_trusted_device(&removed_subject) {
                     Some(client) => !client.capability_cannot_be_removed(),
                     None         => false,
                 };
-                issuer_can_replace && removee_is_removable &&
-                  !self.trusted_devices.contains_key(&addee) &&
+                issuer_can_replace && removed_subject_is_removable &&
+                  !self.trusted_devices.contains_key(&added_subject) &&
                   entry.verify_signature(&entry.issuer, &entry.signature) &&
-                  entry.verify_signature(&addee, &addee_signature)
+                  entry.verify_signature(&added_subject, &added_subject_signature)
             },
         }
     }
@@ -182,10 +182,10 @@ impl FullJournal {
                 Operation::ClientRemove { subject, .. } => {
                     self.trusted_devices.remove(&subject);
                 },
-                Operation::ClientReplace { removee, capabilities, addee, .. } => {
-                    self.trusted_devices.remove(&removee);
-                    self.trusted_devices.insert(addee, ClientInfo {
-                        key: addee,
+                Operation::ClientReplace { removed_subject, capabilities, added_subject, .. } => {
+                    self.trusted_devices.remove(&removed_subject);
+                    self.trusted_devices.insert(added_subject, ClientInfo {
+                        key: added_subject,
                         capabilities: capabilities,
                         entry: entry,
                     });
@@ -363,11 +363,11 @@ impl FullJournal {
                         return false;
                     }
 
-                Operation::ClientReplace { removee, capabilities, addee, addee_signature, .. } => {
-                    if !op_remove_client(&removee, &mut trusted_devices) {
+                Operation::ClientReplace { removed_subject, capabilities, added_subject, added_subject_signature, .. } => {
+                    if !op_remove_client(&removed_subject, &mut trusted_devices) {
                         return false;
                     };
-                    if !op_add_client(&addee, &addee_signature, &capabilities, &mut trusted_devices) {
+                    if !op_add_client(&added_subject, &added_subject_signature, &capabilities, &mut trusted_devices) {
                         return false;
                     };
                 }
@@ -427,8 +427,8 @@ impl FullJournal {
                     if subject == le.issuer { return Some(l) },
                 Operation::ClientRemove { .. } =>
                     {},
-                Operation::ClientReplace { addee, .. } =>
-                    if addee == le.issuer { return Some(l) },
+                Operation::ClientReplace { added_subject, .. } =>
+                    if added_subject == le.issuer { return Some(l) },
             };
         }
         None
@@ -470,10 +470,10 @@ impl ShortJournal {
                 self.trusted_devices.contains_key(&le.issuer) &&
                 self.trusted_devices.contains_key(&subject) &&
                 le.verify_signature(&le.issuer, &le.signature),
-            Operation::ClientReplace { removee, addee, addee_signature: _, .. } =>
-                self.trusted_devices.contains_key(&removee) &&
+            Operation::ClientReplace { removed_subject, added_subject, added_subject_signature: _, .. } =>
+                self.trusted_devices.contains_key(&removed_subject) &&
                 self.trusted_devices.contains_key(&le.issuer) &&
-                (!self.trusted_devices.contains_key(&addee) || addee == removee)&&
+                (!self.trusted_devices.contains_key(&added_subject) || added_subject == removed_subject)&&
                 le.verify_signature(&le.issuer, &le.signature),
         }
     }
@@ -490,9 +490,9 @@ impl ShortJournal {
                 Operation::ClientRemove { subject, .. } => {
                     self.trusted_devices.remove(&subject);
                 },
-                Operation::ClientReplace { removee, addee, .. } => {
-                    self.trusted_devices.remove(&removee);
-                    self.trusted_devices.insert(addee, le);
+                Operation::ClientReplace { removed_subject, added_subject, .. } => {
+                    self.trusted_devices.remove(&removed_subject);
+                    self.trusted_devices.insert(added_subject, le);
                 },
             };
             self.hash = self.entry.hash();
