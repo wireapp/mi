@@ -209,21 +209,25 @@ fn fuzz_testing() {
         // that adds a device which isn't in journal yet (assuming that the
         // journal isn't full), or it's an entry that removes a device which
         // is in the journal already (assuming that the journal won't become
-        // empty).
+        // empty).  Thirdly, if there are at least two devices, one of them
+        // can replace another with a new one.
         loop {
+            // pick a trusted issuer.
             let mut c = <usize as GoodRand>::rand() % (trusted.len() as usize);
             counter = 0;
             for e in trusted.values() {
-                issuer = e;
-                iss_pk = &issuer.key;
                 if counter == c {
+                    issuer = e;
+                    iss_pk = &issuer.key;
                     break;
                 }
                 counter += 1;
             }
 
+            // find index into pub_keys, sec_keys.
             let found_index = pub_keys.iter().enumerate().find(|&p| p.1[..] == iss_pk[..]).unwrap();
 
+            // construct a random, sound operation.
             iss_sk = &sec_keys[found_index.0];
             c = <usize as GoodRand>::rand() % DEVICES;
             sub_sk = &sec_keys[c];
