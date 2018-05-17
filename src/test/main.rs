@@ -203,6 +203,7 @@ fn fuzz_testing() {
         let mut iss_sk;
         let mut sub_pk;
         let mut sub_sk;
+        let mut sub_added_pk;
         let mut operation;
 
         // Let's generate an entry that makes sense: either it's an entry
@@ -233,6 +234,31 @@ fn fuzz_testing() {
             sub_sk = &sec_keys[c];
             sub_pk = &pub_keys[c];
 
+            if (<usize as GoodRand>::rand() % 3) == 0 &&
+                trusted.contains_key(sub_pk) && trusted.len() > 1 &&  // TODO: should be `trusted.len() >= 1`!
+                trusted.len() < MAX_DEVICES {
+                loop {
+                    let c2 = <usize as GoodRand>::rand() % DEVICES;
+                    if c2 != c {
+                        continue;  // device cannot replace it self.  TODO: should be allowed!
+                    }
+                    for e in trusted.values() {
+                        if pub_keys[c2][..] == e.key[..] {
+                            continue;  // has been added before.
+                        }
+                    }
+                    sub_added_pk = &pub_keys[c2];
+                    break;
+                };
+
+                operation = Operation::ClientReplace {
+                    removed_subject: *sub_pk,
+                    capabilities: DeviceType::PermanentDevice as u32,
+                    added_subject: *sub_added_pk,
+                    added_subject_signature: EMPTYSIGNATURE,
+                };
+                break;  // found it!
+            }
             if trusted.contains_key(sub_pk) && trusted.len() > 1 {
                 operation = Operation::ClientRemove {
                     subject: *sub_pk,
@@ -254,6 +280,7 @@ fn fuzz_testing() {
                               iss_pk,
                               iss_sk) {
             None => {
+                // TODO: this chokes on replace operations, but shouldn't.  (always?  often?)
                 println!("Couldn't create new entry. Number of trusted devices: {}",
                          trusted.len());
                 continue;
