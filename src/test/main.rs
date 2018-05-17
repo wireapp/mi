@@ -203,32 +203,62 @@ fn fuzz_testing() {
         let mut iss_sk;
         let mut sub_pk;
         let mut sub_sk;
+        let mut sub_added_pk;
         let mut operation;
 
         // Let's generate an entry that makes sense: either it's an entry
         // that adds a device which isn't in journal yet (assuming that the
         // journal isn't full), or it's an entry that removes a device which
         // is in the journal already (assuming that the journal won't become
-        // empty).
+        // empty).  Thirdly, if there are at least two devices, one of them
+        // can replace another with a new one.
         loop {
+            // pick a trusted issuer.
             let mut c = <usize as GoodRand>::rand() % (trusted.len() as usize);
             counter = 0;
             for e in trusted.values() {
-                issuer = e;
-                iss_pk = &issuer.key;
                 if counter == c {
+                    issuer = e;
+                    iss_pk = &issuer.key;
                     break;
                 }
                 counter += 1;
             }
 
+            // find index into pub_keys, sec_keys.
             let found_index = pub_keys.iter().enumerate().find(|&p| p.1[..] == iss_pk[..]).unwrap();
 
+            // construct a random, sound operation.
             iss_sk = &sec_keys[found_index.0];
             c = <usize as GoodRand>::rand() % DEVICES;
             sub_sk = &sec_keys[c];
             sub_pk = &pub_keys[c];
 
+            if (<usize as GoodRand>::rand() % 3) == 0 &&
+                trusted.contains_key(sub_pk) && trusted.len() > 1 &&  // TODO: should be `trusted.len() >= 1`!
+                trusted.len() < MAX_DEVICES {
+                loop {
+                    let c2 = <usize as GoodRand>::rand() % DEVICES;
+                    if c2 != c {
+                        continue;  // device cannot replace it self.  TODO: should be allowed!
+                    }
+                    for e in trusted.values() {
+                        if pub_keys[c2][..] == e.key[..] {
+                            continue;  // has been added before.
+                        }
+                    }
+                    sub_added_pk = &pub_keys[c2];
+                    break;
+                };
+
+                operation = Operation::ClientReplace {
+                    removed_subject: *sub_pk,
+                    capabilities: DeviceType::PermanentDevice as u32,
+                    added_subject: *sub_added_pk,
+                    added_subject_signature: EMPTYSIGNATURE,
+                };
+                break;  // found it!
+            }
             if trusted.contains_key(sub_pk) && trusted.len() > 1 {
                 operation = Operation::ClientRemove {
                     subject: *sub_pk,
@@ -250,6 +280,7 @@ fn fuzz_testing() {
                               iss_pk,
                               iss_sk) {
             None => {
+                // TODO: this chokes on replace operations, but shouldn't.  (always?  often?)
                 println!("Couldn't create new entry. Number of trusted devices: {}",
                          trusted.len());
                 continue;

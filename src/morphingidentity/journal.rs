@@ -41,7 +41,7 @@ impl FullJournal {
                issuer_pk: &PublicKey,
                issuer_sk: &SecretKey)
                -> Option<FullJournal> {
-        let operation = Operation::ClientAdd {
+        let initial_operation = Operation::ClientAdd {
                 subject: *issuer_pk,
                 subject_signature: EMPTYSIGNATURE,
                 capabilities: DeviceType::PermanentDevice as u32,
@@ -49,7 +49,7 @@ impl FullJournal {
         let mut entry = JournalEntry::new(_journal_id,
                                           hash(&[]),
                                           0,
-                                          operation,
+                                          initial_operation,
                                           *issuer_pk);
         let signature = entry.sign(issuer_sk);
         entry.signature = signature;
@@ -69,6 +69,10 @@ impl FullJournal {
             hash: hash(&[]),
         })
     }
+
+    /// Create and return a `JournalEntry` without adding it to the
+    /// journal.  Needs to be a function of `FullJournal` for the
+    /// digest of the previous entry (and some checks).
     pub fn create_entry(&self,
                         operation: Operation,
                         issuer_pk: &PublicKey,
@@ -86,6 +90,10 @@ impl FullJournal {
                 if devices < 2 { return None };
                 if !self.trusted_devices.contains_key(&subject) { return None };
             },
+            Operation::ClientReplace { removed_subject, added_subject, .. } => {
+                if !self.trusted_devices.contains_key(&removed_subject) { return None };
+                if self.trusted_devices.contains_key(&added_subject) { return None };
+            },
         }
         if self.entries.len() >= u32::max_value() as usize || self.entries.is_empty() ||
            !self.trusted_devices.contains_key(issuer_pk) {
@@ -100,6 +108,7 @@ impl FullJournal {
         entry.signature = entry.sign(issuer_sk);
         Some(entry)
     }
+
     // pub fn create_add_permanent_device() {}
     // pub fn create_add_temporary_device() {}
     // pub fn create_remove_device() {}
@@ -115,6 +124,9 @@ impl FullJournal {
         }
         let devices = self.trusted_devices.len();
         match entry.operation {
+            // TODO: some of the checks here are duplicates from
+            // `create_entry`.  there may be a reason for that, but
+            // probably not.
             Operation::ClientAdd { .. } if devices >= MAX_DEVICES => false,
             Operation::ClientRemove { .. } if devices < 2 => false,
             Operation::ClientAdd { subject, subject_signature, .. } => {
@@ -136,23 +148,48 @@ impl FullJournal {
                     Some(client) => !client.capability_cannot_be_removed(),
                     None         => false,
                 };
-                issuer_can_remove && subject_is_removable && 
+                issuer_can_remove && subject_is_removable &&
                   entry.verify_signature(&entry.issuer, &entry.signature)
+            },
+            Operation::ClientReplace { removed_subject, added_subject, added_subject_signature, .. } => {
+                let issuer_can_replace = match self.get_trusted_device(&entry.issuer) {
+                    Some(client) => client.capability_can_remove() && client.capability_can_add(),
+                    None         => false,
+                };
+                let removed_subject_is_removable = match self.get_trusted_device(&removed_subject) {
+                    Some(client) => !client.capability_cannot_be_removed(),
+                    None         => false,
+                };
+                issuer_can_replace && removed_subject_is_removable &&
+                  !self.trusted_devices.contains_key(&added_subject) &&
+                  entry.verify_signature(&entry.issuer, &entry.signature) &&
+                  entry.verify_signature(&added_subject, &added_subject_signature)
             },
         }
     }
+
     pub fn add_entry(&mut self, entry: JournalEntry) -> bool {
         if self.can_add_entry(&entry) {
             self.entries.push(entry.clone());
             match entry.operation {
-                Operation::ClientAdd { subject, capabilities, .. } =>
+                Operation::ClientAdd { subject, capabilities, .. } => {
                     self.trusted_devices.insert(subject, ClientInfo {
                         key: subject,
                         capabilities: capabilities,
                         entry: entry,
-                    }),
-                Operation::ClientRemove { subject, .. } =>
-                    self.trusted_devices.remove(&subject),
+                    });
+                },
+                Operation::ClientRemove { subject, .. } => {
+                    self.trusted_devices.remove(&subject);
+                },
+                Operation::ClientReplace { removed_subject, capabilities, added_subject, .. } => {
+                    self.trusted_devices.remove(&removed_subject);
+                    self.trusted_devices.insert(added_subject, ClientInfo {
+                        key: added_subject,
+                        capabilities: capabilities,
+                        entry: entry,
+                    });
+                },
             };
             self.hash = self.entries.last().unwrap().hash();
             return true;
@@ -160,6 +197,7 @@ impl FullJournal {
         drop(entry);
         false
     }
+
     pub fn as_bytes(&self) -> Vec<u8> {
         run_encoder(&|mut e| {
             let num = self.entries.len();
@@ -173,6 +211,7 @@ impl FullJournal {
             Ok(())
         }).unwrap()
     }
+
     pub fn from_bytes(bytes: Vec<u8>) -> DecodeResult<FullJournal> {
         run_decoder(bytes, &|mut d| {
             ensure_array_length(d, "FullJournal", 2)?;
@@ -210,6 +249,7 @@ impl FullJournal {
             Ok(journal)
         })
     }
+
     /// Check that the root entry of the journal is what we expect (a
     /// self-signed addition entry). In case it is, return `ClientInfo`
     /// corresponding to the root device.
@@ -226,6 +266,8 @@ impl FullJournal {
             _ => None,
         }
     }
+
+    /// Verify all invariants of the entire journal.
     pub fn check_journal(&mut self) -> bool {
         println!("check_journal: started");
         let mut trusted_devices: HashMap<PublicKey, ClientInfo> = HashMap::new();
@@ -266,8 +308,9 @@ impl FullJournal {
                 }
                 return false;
             }
-            match le.operation {
-                Operation::ClientAdd { subject, subject_signature, capabilities, .. } =>
+
+            // TODO: this check probably duplicates code from FullJournal::can_add_entry.  deduplicate!
+            let op_add_client = |&subject, &subject_signature, &capabilities, trusted_devices: &mut HashMap<PublicKey, ClientInfo>|
                 if trusted_devices.contains_key(&le.issuer) &&
                    !trusted_devices.contains_key(&subject) &&
                    trusted_devices[&le.issuer].capability_can_add() &&
@@ -278,6 +321,7 @@ impl FullJournal {
                            capabilities: capabilities,
                            entry: le.clone()
                        });
+                       true
                 } else {
                     println!("check_journal: Entry of type 'Add' error");
                     if !trusted_devices.contains_key(&le.issuer) {
@@ -292,19 +336,41 @@ impl FullJournal {
                     if trusted_devices.contains_key(&subject) {
                         println!("check_journal: Subject is already trusted");
                     }
-                    return false;
-                },
-                Operation::ClientRemove { subject, .. } =>
+                    false
+                };
+
+            let op_remove_client = |&subject, trusted_devices: &mut HashMap<PublicKey, ClientInfo>|
                 if trusted_devices.contains_key(&le.issuer) &&
                    trusted_devices.contains_key(&subject) &&
                    trusted_devices[&le.issuer].capability_can_remove() &&
                    !trusted_devices[&subject].capability_cannot_be_removed() &&
-                   le.verify_signature(&le.issuer, &le.signature) {
+                   le.verify_signature(&le.issuer, &le.signature)
+                {
                     trusted_devices.remove(&subject);
+                    true
                 } else {
                     println!("check_journal: Entry of type 'Remove' error");
-                    return false;
-                },
+                    false
+                };
+
+            match le.operation {
+                Operation::ClientAdd { subject, subject_signature, capabilities, .. } =>
+                    if !op_add_client(&subject, &subject_signature, &capabilities, &mut trusted_devices) {
+                        return false;
+                    }
+                Operation::ClientRemove { subject, .. } =>
+                    if !op_remove_client(&subject, &mut trusted_devices) {
+                        return false;
+                    }
+
+                Operation::ClientReplace { removed_subject, capabilities, added_subject, added_subject_signature, .. } => {
+                    if !op_remove_client(&removed_subject, &mut trusted_devices) {
+                        return false;
+                    };
+                    if !op_add_client(&added_subject, &added_subject_signature, &capabilities, &mut trusted_devices) {
+                        return false;
+                    };
+                }
             }
         }
         println!("check_journal: Found {} trusted devices:",
@@ -318,29 +384,37 @@ impl FullJournal {
         self.trusted_devices = trusted_devices;
         true
     }
+
     /// Get journal entry corresponding to the addition of a device (if the
     /// device is still in the set of trusted clients).
     pub fn get_trusted_device(&self, device: &PublicKey) -> Option<&ClientInfo> {
         self.trusted_devices.get(device)
     }
+
     /// Get all trusted clients.
     pub fn get_trusted_devices(&self) -> HashMap<PublicKey, ClientInfo> {
         self.trusted_devices.clone()
     }
+
     pub fn is_device_trusted(&self, device: &PublicKey) -> bool {
         self.trusted_devices.contains_key(device)
     }
+
     /// Get journal version (i.e. index of the latest entry, assuming that
     /// the journal is not empty).
     pub fn get_journal_version(&self) -> u32 {
         self.entries.len() as u32 - 1
     }
+
     pub fn get_journal_id(&self) -> JournalID {
         JournalID(self.journal_id)
     }
+
     pub fn get_journal_hash(&self) -> Digest {
         self.hash
     }
+
+    /// Find the entry that added the signer of a given entry to the journal.
     pub fn get_parent(&self, le: &JournalEntry) -> Option<&JournalEntry> {
         let start = le.index as usize;
         if start == 0 {
@@ -353,13 +427,17 @@ impl FullJournal {
                     if subject == le.issuer { return Some(l) },
                 Operation::ClientRemove { .. } =>
                     {},
+                Operation::ClientReplace { added_subject, .. } =>
+                    if added_subject == le.issuer { return Some(l) },
             };
         }
         None
     }
+
     pub fn get_entry(&self, index: usize) -> &JournalEntry {
         &self.entries[index]
     }
+
     pub fn get_permanent_hash(&self) -> Digest {
         self.entries[0].hash()
     }
@@ -375,14 +453,14 @@ pub struct ShortJournal {
 
 impl ShortJournal {
     pub fn new() {}
-    pub fn test_entry(&self, le: &JournalEntry) -> bool {
+    pub fn can_add_entry(&self, le: &JournalEntry) -> bool {
         if self.trusted_devices.len() >= MAX_DEVICES || self.version >= (u32::max_value() - 1) ||
            le.journal_id != self.journal_id ||
            self.entry.hash()[..] == le.history_hash[..] ||
            le.index != (self.version + 1) {
             return false;
         }
-        match le.operation {
+        match le.operation {  // TODO code duplication, see TODOs above.
             Operation::ClientAdd { subject, subject_signature, .. } =>
                 self.trusted_devices.contains_key(&le.issuer) &&
                 !self.trusted_devices.contains_key(&subject) &&
@@ -392,19 +470,30 @@ impl ShortJournal {
                 self.trusted_devices.contains_key(&le.issuer) &&
                 self.trusted_devices.contains_key(&subject) &&
                 le.verify_signature(&le.issuer, &le.signature),
+            Operation::ClientReplace { removed_subject, added_subject, added_subject_signature: _, .. } =>
+                self.trusted_devices.contains_key(&removed_subject) &&
+                self.trusted_devices.contains_key(&le.issuer) &&
+                (!self.trusted_devices.contains_key(&added_subject) || added_subject == removed_subject)&&
+                le.verify_signature(&le.issuer, &le.signature),
         }
     }
     pub fn get_entry(&self) -> JournalEntry {
         self.entry.clone()
     }
     pub fn add_entry(&mut self, le: JournalEntry) -> bool {
-        if self.test_entry(&le) {
+        if self.can_add_entry(&le) {
             self.entry = le.clone();
             match le.operation {
-                Operation::ClientAdd { subject, .. } =>
-                    self.trusted_devices.insert(subject, le),
-                Operation::ClientRemove { subject, .. } =>
-                    self.trusted_devices.remove(&subject),
+                Operation::ClientAdd { subject, .. } => {
+                    self.trusted_devices.insert(subject, le);
+                },
+                Operation::ClientRemove { subject, .. } => {
+                    self.trusted_devices.remove(&subject);
+                },
+                Operation::ClientReplace { removed_subject, added_subject, .. } => {
+                    self.trusted_devices.remove(&removed_subject);
+                    self.trusted_devices.insert(added_subject, le);
+                },
             };
             self.hash = self.entry.hash();
             return true;
