@@ -51,7 +51,7 @@ pub fn run_decoder_full<T>(
 
 // Decoding errors /////////////////////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum MIDecodeError {
     /// Journal format version is unsupported.
     UnsupportedJournalVersion {

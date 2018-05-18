@@ -371,7 +371,9 @@ mod tests {
     use super::*;
 
     use sodiumoxide;
+    use cbor::DecodeError;
     use rand_utils::{GoodRand, randombytes, randomnumber};
+    use cbor_utils::MIDecodeError;
 
     /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
@@ -440,7 +442,16 @@ mod tests {
             let size = 1 + randomnumber(100) as usize;
             let mut garbage = randombytes(size);
             bytes.append(&mut garbage);
-            assert!(JournalEntry::from_bytes(bytes).is_err())
+            let res = JournalEntry::from_bytes(bytes);
+            let res_str = format!("{:?}", res);
+            if let Err(DecodeError::Other(err)) = res {
+                if let Ok(mi) = err.downcast::<MIDecodeError>() {
+                    if let MIDecodeError::LeftoverInput = *mi {
+                        continue;
+                    }
+                }
+            }
+            panic!("expected MIDecodeError::LeftoverInput, got {}", res_str);
         }
     }
 }
