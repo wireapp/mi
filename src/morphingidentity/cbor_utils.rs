@@ -33,9 +33,25 @@ pub fn run_decoder<T>(
     dec(&mut Decoder::new(Config::default(), Cursor::new(bytes)))
 }
 
+/// Run a CBOR decoder on a bytestring and ensure that the whole bytestring
+/// has been consumed.
+pub fn run_decoder_full<T>(
+    bytes: Vec<u8>,
+    dec: &Fn(&mut DecoderVec) -> DecodeResult<T>,
+) -> DecodeResult<T> {
+    let len = bytes.len();
+    let mut d = Decoder::new(Config::default(), Cursor::new(bytes));
+    let res = dec(&mut d)?;
+    if d.into_reader().position() as usize == len {
+        Ok(res)
+    } else {
+        Err(MIDecodeError::LeftoverInput.into())
+    }
+}
+
 // Decoding errors /////////////////////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum MIDecodeError {
     /// Journal format version is unsupported.
     UnsupportedJournalVersion {
@@ -67,6 +83,8 @@ pub enum MIDecodeError {
         field_name: &'static str,
         field_key: Key,
     },
+    /// After decoding there is still some input left.
+    LeftoverInput,
 }
 
 impl From<MIDecodeError> for DecodeError {
@@ -128,6 +146,7 @@ impl fmt::Display for MIDecodeError {
                 "Duplicate field: {} (key {:?})",
                 field_name, field_key
             ),
+            MIDecodeError::LeftoverInput => write!(f, "Leftover input"),
         }
     }
 }

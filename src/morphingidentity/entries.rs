@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 
 use journal::FullJournal;
 use utils::EMPTYSIGNATURE;
-use cbor_utils::{run_encoder, run_decoder};
+use cbor_utils::{run_encoder, run_decoder_full};
 
 pub const FORMAT_ENTRY_VERSION: u32 = 0;
 
@@ -230,6 +230,7 @@ impl JournalEntry {
             signature: EMPTYSIGNATURE,
         }
     }
+
     /// Sign the entry with the given key.
     ///
     /// We always sign the `partial_hash` of the entry (which does not go
@@ -237,6 +238,7 @@ impl JournalEntry {
     pub fn sign(&self, key: &SecretKey) -> Signature {
         sign::sign_detached(&self.partial_hash()[..], key)
     }
+
     /// Verify some signature of the entry (e.g. issuer's signature or
     /// subject's signature if present).
     ///
@@ -246,6 +248,7 @@ impl JournalEntry {
     pub fn verify_signature(&self, signee: &PublicKey, signature: &Signature) -> bool {
         sign::verify_detached(signature, self.partial_hash().as_ref(), signee)
     }
+
     pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
         e.array(2)?;
         e.u32(FORMAT_ENTRY_VERSION)?;
@@ -259,38 +262,20 @@ impl JournalEntry {
         e.u8(6)?; e.bytes(&self.signature[..])?;
         Ok(())
     }
+
     pub fn hash(&self) -> Digest {
         hash(&self.as_bytes())
     }
+
     /// Return a hash of the entry with signatures set to some default
     /// values.
     pub fn partial_hash(&self) -> Digest {
-        let partial = JournalEntry {
-                signature: EMPTYSIGNATURE,
-                operation: match (*self).operation {
-                    Operation::ClientAdd { subject, capabilities, subject_signature: _ } =>
-                    // underscore to indicate "will not use".
-                    // TODO: there is a nicer way to do this grep above in this file for 'ref mut'.
-                        Operation::ClientAdd {
-                            subject: subject,
-                            subject_signature: EMPTYSIGNATURE,
-                            capabilities: capabilities,
-                        },
-                    Operation::ClientRemove { subject } =>
-                        Operation::ClientRemove {
-                            subject: subject,
-                        },
-                    Operation::ClientReplace { removed_subject, capabilities, added_subject, added_subject_signature: _ } =>
-                        Operation::ClientReplace {
-                            removed_subject: removed_subject,
-                            capabilities: capabilities,
-                            added_subject: added_subject,
-                            added_subject_signature: EMPTYSIGNATURE
-                        },
-                },
-                .. self.clone() };
+        let mut partial = self.clone();
+        partial.signature = EMPTYSIGNATURE;
+        partial.operation.set_subject_signature(EMPTYSIGNATURE);
         hash(&partial.as_bytes())
     }
+
     pub fn decode<R: Read + Skip>(d: &mut Decoder<R>) -> DecodeResult<JournalEntry> {
         ensure_array_length(d, "JournalEntry", 2)?;
         let format_version = d.u32()?;
@@ -335,11 +320,15 @@ impl JournalEntry {
             signature:      to_field!(Key::u64(6), "JournalEntry::signature", signature),
         })
     }
+
+    /// Encode an entry as CBOR.
     pub fn as_bytes(&self) -> Vec<u8> {
         run_encoder(&|mut e| self.encode(&mut e)).unwrap()
     }
+
+    /// Decode the entry from CBOR.
     pub fn from_bytes(bs: Vec<u8>) -> DecodeResult<Self> {
-        run_decoder(bs, &|mut d| Self::decode(&mut d))
+        run_decoder_full(bs, &|mut d| Self::decode(&mut d) )
     }
 }
 
@@ -361,6 +350,7 @@ impl EntryExtension {
             Ok(())
         }).unwrap())
     }
+
     pub fn create_extension(&self, journal: &FullJournal) -> EntryExtension {
         let trusted_devices = journal.get_trusted_devices();
         let mut permanent_devices: Vec<PublicKey> = Vec::new();
@@ -381,8 +371,11 @@ mod tests {
     use super::*;
 
     use sodiumoxide;
-    use rand_utils::GoodRand;
+    use cbor::DecodeError;
+    use rand_utils::{GoodRand, randombytes, randomnumber};
+    use cbor_utils::MIDecodeError;
 
+    /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
         match <u32 as GoodRand>::rand() % OPERATIONS {
             0 => Operation::ClientAdd {
@@ -403,21 +396,62 @@ mod tests {
         }
     }
 
+    /// Produce a random `JournalEntry`.
+    fn rand_journal_entry() -> JournalEntry {
+        JournalEntry {
+            journal_id: GoodRand::rand(),
+            history_hash: GoodRand::rand(),
+            extension_hash: GoodRand::rand(),
+            index: GoodRand::rand(),
+            operation: rand_operation(),
+            issuer: GoodRand::rand(),
+            signature: GoodRand::rand(),
+        }
+    }
+
     #[test]
+    /// Test that encoding/decoding operations for `JournalEntry` are
+    /// inverses.
     fn journal_entry_roundtrip() {
         sodiumoxide::init();
-
         for _ in 0..100 {
-            let entry = JournalEntry {
-                journal_id: GoodRand::rand(),
-                history_hash: GoodRand::rand(),
-                extension_hash: GoodRand::rand(),
-                index: GoodRand::rand(),
-                operation: rand_operation(),
-                issuer: GoodRand::rand(),
-                signature: GoodRand::rand(),
-            };
+            let entry = rand_journal_entry();
             assert_eq!(entry, JournalEntry::from_bytes(entry.as_bytes()).unwrap())
+        }
+    }
+
+    #[test]
+    /// Test that decoding random garbage bytes as `JournalEntry` doesn't
+    /// work.
+    fn journal_entry_garbage() {
+        sodiumoxide::init();
+        for _ in 0..100 {
+            let size = randomnumber(1000) as usize;
+            let garbage = randombytes(size);
+            assert!(JournalEntry::from_bytes(garbage).is_err());
+        }
+    }
+
+    #[test]
+    /// Test that decoding an entry with some bytes appended to it doesn't
+    /// work.
+    fn journal_entry_remainder() {
+        sodiumoxide::init();
+        for _ in 0..100 {
+            let mut bytes = rand_journal_entry().as_bytes();
+            let size = 1 + randomnumber(100) as usize;
+            let mut garbage = randombytes(size);
+            bytes.append(&mut garbage);
+            let res = JournalEntry::from_bytes(bytes);
+            let res_str = format!("{:?}", res);
+            if let Err(DecodeError::Other(err)) = res {
+                if let Ok(mi) = err.downcast::<MIDecodeError>() {
+                    if let MIDecodeError::LeftoverInput = *mi {
+                        continue;
+                    }
+                }
+            }
+            panic!("expected MIDecodeError::LeftoverInput, got {}", res_str);
         }
     }
 }
