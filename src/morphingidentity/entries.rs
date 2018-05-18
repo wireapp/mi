@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 
 use journal::FullJournal;
 use utils::EMPTYSIGNATURE;
-use cbor_utils::{run_encoder, run_decoder};
+use cbor_utils::{run_encoder, run_decoder_full};
 
 pub const FORMAT_ENTRY_VERSION: u32 = 0;
 
@@ -321,12 +321,14 @@ impl JournalEntry {
         })
     }
 
+    /// Encode an entry as CBOR.
     pub fn as_bytes(&self) -> Vec<u8> {
         run_encoder(&|mut e| self.encode(&mut e)).unwrap()
     }
 
+    /// Decode the entry from CBOR.
     pub fn from_bytes(bs: Vec<u8>) -> DecodeResult<Self> {
-        run_decoder(bs, &|mut d| Self::decode(&mut d))
+        run_decoder_full(bs, &|mut d| Self::decode(&mut d) )
     }
 }
 
@@ -425,6 +427,20 @@ mod tests {
             let size = randomnumber(1000) as usize;
             let garbage = randombytes(size);
             assert!(JournalEntry::from_bytes(garbage).is_err());
+        }
+    }
+
+    #[test]
+    /// Test that decoding an entry with some bytes appended to it doesn't
+    /// work.
+    fn journal_entry_remainder() {
+        sodiumoxide::init();
+        for _ in 0..100 {
+            let mut bytes = rand_journal_entry().as_bytes();
+            let size = 1 + randomnumber(100) as usize;
+            let mut garbage = randombytes(size);
+            bytes.append(&mut garbage);
+            assert!(JournalEntry::from_bytes(bytes).is_err())
         }
     }
 }
