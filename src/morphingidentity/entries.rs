@@ -369,7 +369,7 @@ mod tests {
     use super::*;
 
     use sodiumoxide;
-    use rand_utils::GoodRand;
+    use rand_utils::{GoodRand, randombytes, randomnumber};
 
     /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
@@ -413,6 +413,18 @@ mod tests {
         for _ in 0..100 {
             let entry = rand_journal_entry();
             assert_eq!(entry, JournalEntry::from_bytes(entry.as_bytes()).unwrap())
+        }
+    }
+
+    #[test]
+    /// Test that decoding random garbage bytes as `JournalEntry` doesn't
+    /// work.
+    fn journal_entry_garbage() {
+        sodiumoxide::init();
+        for _ in 0..100 {
+            let size = randomnumber(1000) as usize;
+            let garbage = randombytes(size);
+            assert!(JournalEntry::from_bytes(garbage).is_err());
         }
     }
 }
