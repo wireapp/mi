@@ -1,4 +1,4 @@
-use sodiumoxide::randombytes::randombytes;
+pub use sodiumoxide::randombytes::randombytes;
 
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash::sha256;
@@ -12,6 +12,21 @@ use uuid;
 pub trait GoodRand {
     fn rand() -> Self;
 }
+
+/// Generate a random integer in range [0, n).
+pub fn randomnumber(n: u64) -> u64 {
+    // We want to avoid modulo bias, so we use the arc4random_uniform
+    // implementation (http://stackoverflow.com/a/20051580/615030).
+    if n < 2 { return 0; }
+    let min: u64 = n.wrapping_neg() % n;   // 2^64 mod n == (2^64 - n) mod n
+    let mut r: u64 = GoodRand::rand();
+    while r < min {
+        r = GoodRand::rand();
+    }
+    return r % n;
+}
+
+// implementations of GoodRand /////////////////////////////////////////////
 
 impl GoodRand for u8 {
     fn rand() -> u8 {
