@@ -413,20 +413,26 @@ mod tests {
         }
     }
 
+    /// Produce a random `JournalEntry`.
+    fn rand_journal_entry() -> JournalEntry {
+        JournalEntry {
+            journal_id: GoodRand::rand(),
+            history_hash: GoodRand::rand(),
+            extension_hash: GoodRand::rand(),
+            index: GoodRand::rand(),
+            operation: rand_operation(),
+            issuer: GoodRand::rand(),
+            signature: GoodRand::rand(),
+        }
+    }
+
     #[test]
+    /// Test that encoding/decoding operations for `JournalEntry` are
+    /// inverses.
     fn journal_entry_roundtrip() {
         sodiumoxide::init();
-
         for _ in 0..100 {
-            let entry = JournalEntry {
-                journal_id: GoodRand::rand(),
-                history_hash: GoodRand::rand(),
-                extension_hash: GoodRand::rand(),
-                index: GoodRand::rand(),
-                operation: rand_operation(),
-                issuer: GoodRand::rand(),
-                signature: GoodRand::rand(),
-            };
+            let entry = rand_journal_entry();
             assert_eq!(entry, JournalEntry::from_bytes(entry.as_bytes()).unwrap())
         }
     }
