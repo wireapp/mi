@@ -230,6 +230,7 @@ impl JournalEntry {
             signature: EMPTYSIGNATURE,
         }
     }
+
     /// Sign the entry with the given key.
     ///
     /// We always sign the `partial_hash` of the entry (which does not go
@@ -237,6 +238,7 @@ impl JournalEntry {
     pub fn sign(&self, key: &SecretKey) -> Signature {
         sign::sign_detached(&self.partial_hash()[..], key)
     }
+
     /// Verify some signature of the entry (e.g. issuer's signature or
     /// subject's signature if present).
     ///
@@ -246,6 +248,7 @@ impl JournalEntry {
     pub fn verify_signature(&self, signee: &PublicKey, signature: &Signature) -> bool {
         sign::verify_detached(signature, self.partial_hash().as_ref(), signee)
     }
+
     pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
         e.array(2)?;
         e.u32(FORMAT_ENTRY_VERSION)?;
@@ -259,9 +262,11 @@ impl JournalEntry {
         e.u8(6)?; e.bytes(&self.signature[..])?;
         Ok(())
     }
+
     pub fn hash(&self) -> Digest {
         hash(&self.as_bytes())
     }
+
     /// Return a hash of the entry with signatures set to some default
     /// values.
     pub fn partial_hash(&self) -> Digest {
@@ -291,6 +296,7 @@ impl JournalEntry {
                 .. self.clone() };
         hash(&partial.as_bytes())
     }
+
     pub fn decode<R: Read + Skip>(d: &mut Decoder<R>) -> DecodeResult<JournalEntry> {
         ensure_array_length(d, "JournalEntry", 2)?;
         let format_version = d.u32()?;
@@ -335,9 +341,11 @@ impl JournalEntry {
             signature:      to_field!(Key::u64(6), "JournalEntry::signature", signature),
         })
     }
+
     pub fn as_bytes(&self) -> Vec<u8> {
         run_encoder(&|mut e| self.encode(&mut e)).unwrap()
     }
+
     pub fn from_bytes(bs: Vec<u8>) -> DecodeResult<Self> {
         run_decoder(bs, &|mut d| Self::decode(&mut d))
     }
@@ -361,6 +369,7 @@ impl EntryExtension {
             Ok(())
         }).unwrap())
     }
+
     pub fn create_extension(&self, journal: &FullJournal) -> EntryExtension {
         let trusted_devices = journal.get_trusted_devices();
         let mut permanent_devices: Vec<PublicKey> = Vec::new();
@@ -383,6 +392,7 @@ mod tests {
     use sodiumoxide;
     use rand_utils::GoodRand;
 
+    /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
         match <u32 as GoodRand>::rand() % OPERATIONS {
             0 => Operation::ClientAdd {
