@@ -270,30 +270,9 @@ impl JournalEntry {
     /// Return a hash of the entry with signatures set to some default
     /// values.
     pub fn partial_hash(&self) -> Digest {
-        let partial = JournalEntry {
-                signature: EMPTYSIGNATURE,
-                operation: match (*self).operation {
-                    Operation::ClientAdd { subject, capabilities, subject_signature: _ } =>
-                    // underscore to indicate "will not use".
-                    // TODO: there is a nicer way to do this grep above in this file for 'ref mut'.
-                        Operation::ClientAdd {
-                            subject: subject,
-                            subject_signature: EMPTYSIGNATURE,
-                            capabilities: capabilities,
-                        },
-                    Operation::ClientRemove { subject } =>
-                        Operation::ClientRemove {
-                            subject: subject,
-                        },
-                    Operation::ClientReplace { removed_subject, capabilities, added_subject, added_subject_signature: _ } =>
-                        Operation::ClientReplace {
-                            removed_subject: removed_subject,
-                            capabilities: capabilities,
-                            added_subject: added_subject,
-                            added_subject_signature: EMPTYSIGNATURE
-                        },
-                },
-                .. self.clone() };
+        let mut partial = self.clone();
+        partial.signature = EMPTYSIGNATURE;
+        partial.operation.set_subject_signature(EMPTYSIGNATURE);
         hash(&partial.as_bytes())
     }
 
