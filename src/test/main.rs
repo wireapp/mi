@@ -9,7 +9,7 @@ use uuid::Uuid;
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash;
 
-use morphingidentity::entries::{JournalEntry, DeviceType, Operation};
+use morphingidentity::entries::{JournalEntry, DeviceType, Operation, OPERATIONS};
 use morphingidentity::journal::FullJournal;
 
 use morphingidentity::utils::EMPTYSIGNATURE;
@@ -234,13 +234,13 @@ fn fuzz_testing() {
             sub_sk = &sec_keys[c];
             sub_pk = &pub_keys[c];
 
-            if (<usize as GoodRand>::rand() % 3) == 0 &&              // TODO: use OPERATIONS instead of 3
+            if (<u32 as GoodRand>::rand() % OPERATIONS) == 0 &&
                 trusted.contains_key(sub_pk) && trusted.len() > 1 &&  // TODO: should be `trusted.len() >= 1`!
                 trusted.len() < MAX_DEVICES {
                 loop {
                     let c2 = <usize as GoodRand>::rand() % DEVICES;
                     if c2 != c {
-                        continue;  // device cannot replace it self.  TODO: should be allowed!
+                        continue;  // device cannot replace itself.  TODO: should be allowed!
                     }
                     for e in trusted.values() {
                         if pub_keys[c2][..] == e.key[..] {
