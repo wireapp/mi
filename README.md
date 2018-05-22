@@ -3,11 +3,20 @@
 
 ## Building
 
-You need `libsodium` to be installed.
+You need `libsodium` to be installed. After that, just do
+
+    $ cargo build
 
 ## Running tests
 
-You need both of these to run tests:
+To run all tests:
 
-    $ cargo run test
     $ cargo test
+
+To run just some specific test:
+
+    $ cargo test <test name>
+
+To get output from integration tests:
+
+    $ cargo test -- --nocapture
