@@ -803,10 +803,7 @@ impl ShortJournal {
         self.trusted_devices.clone()
     }
     pub fn is_device_trusted(&self, device: &PublicKey) -> bool {
-        if self.trusted_devices.contains_key(device) {
-            return true;
-        }
-        false
+        self.trusted_devices.contains_key(device)
     }
     pub fn get_journal_version(&self) -> u32 {
         self.version
