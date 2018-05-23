@@ -1,15 +1,16 @@
 extern crate cbor;
-use std::io::{Cursor, Read};
-use std::error::Error;
-use std::fmt;
-use uuid::Uuid;
-use cbor::Config;
 use cbor::decoder::{DecodeError, DecodeResult, Decoder};
 use cbor::encoder::{EncodeError, EncodeResult, Encoder};
 use cbor::value::Key;
-use sodiumoxide::crypto::sign::{PublicKey, Signature, PUBLICKEYBYTES,
-                                SIGNATUREBYTES};
+use cbor::Config;
 use sodiumoxide::crypto::hash::sha256;
+use sodiumoxide::crypto::sign::{
+    PublicKey, Signature, PUBLICKEYBYTES, SIGNATUREBYTES,
+};
+use std::error::Error;
+use std::fmt;
+use std::io::{Cursor, Read};
+use uuid::Uuid;
 
 pub type EncoderVec = Encoder<Cursor<Vec<u8>>>;
 pub type DecoderVec = Decoder<Cursor<Vec<u8>>>;
@@ -168,9 +169,9 @@ pub fn ensure_array_length<R: Read>(
     let actual_length = d.array()?;
     if actual_length != expected_length {
         return Err(MIDecodeError::InvalidArrayLength {
-            type_name: type_name,
-            expected_length: expected_length,
-            actual_length: actual_length,
+            type_name,
+            expected_length,
+            actual_length,
         }.into());
     };
     Ok(())
@@ -231,26 +232,28 @@ pub fn decode_hash<R: Read>(
 // Helper macros (copied from proteus/internal/util.rs) ////////////////////
 
 macro_rules! to_field {
-    ($key: expr, $field: expr, $var: expr) => {
+    ($key:expr, $field:expr, $var:expr) => {
         match $var {
             Some(val) => val,
-            None => return Err(MIDecodeError::MissingField {
-                field_name: $field,
-                field_key: $key,
-            }.into())
+            None => {
+                return Err(MIDecodeError::MissingField {
+                    field_name: $field,
+                    field_key: $key,
+                }.into())
+            }
         }
-    }
+    };
 }
 
 macro_rules! uniq {
-    ($key: expr, $field: expr, $var: ident, $decode_action: expr) => {
+    ($key:expr, $field:expr, $var:ident, $decode_action:expr) => {
         if $var.is_some() {
             return Err(MIDecodeError::DuplicateField {
                 field_name: $field,
                 field_key: $key,
-            }.into())
+            }.into());
         } else {
             $var = Some($decode_action)
         }
-    }
+    };
 }
