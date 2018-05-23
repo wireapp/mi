@@ -6,6 +6,8 @@ use entries::{ClientInfo, DeviceType, JournalEntry, Operation};
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
 use utils::{fmt_hex, EMPTYSIGNATURE};
 use uuid::Uuid;
 
@@ -27,6 +29,81 @@ pub struct JournalID(pub Uuid);
 impl From<Uuid> for JournalID {
     fn from(n: Uuid) -> JournalID {
         JournalID(n)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum CreateEntryError {
+    /// *Addition:* there can be at most `device_limit` trusted devices at
+    /// any time, and this limit has been exceeded.
+    DeviceLimitExceeded { device_limit: u32 },
+    /// *Addition or replacement:* a device that is being added to journal
+    /// is already trusted by the journal and can't be added again.
+    DeviceAlreadyTrusted,
+    /// *Removal:* you're trying to remove the last trusted device from the
+    /// journal.
+    LastDevice,
+    /// *Removal or replacement:* you're trying to remove a device that is
+    /// not in the journal.
+    DeviceNotFound,
+    /// *Any entry:* the journal can only hold `entry_limit` entries.
+    EntryLimitExceeded { entry_limit: u32 },
+    /// *Any entry:* it's impossible to add an entry to a journal with no
+    /// entries. The journal was created incorrectly.
+    EmptyJournal,
+    /// *Any entry:* the entry issuer is not on the list of trusted devices
+    /// and thus is not allowed to add entries to the journal.
+    UntrustedIssuer,
+}
+
+impl fmt::Display for CreateEntryError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match *self {
+            CreateEntryError::DeviceLimitExceeded { device_limit } => {
+                write!(
+                    f,
+                    "When trying to add a device, trusted device limit \
+                     ({} devices) was exceeded",
+                    device_limit
+                )
+            }
+            CreateEntryError::DeviceAlreadyTrusted => write!(
+                f,
+                "The device that is being added (either by \
+                 a 'ClientAdd' or 'ClientReplace' entry) \
+                 is trusted already"
+            ),
+            CreateEntryError::LastDevice => {
+                write!(f, "Removing the last trusted device is not allowed")
+            }
+            CreateEntryError::DeviceNotFound => write!(
+                f,
+                "Trying to remove or replace a device \
+                 that is not in the journal"
+            ),
+            CreateEntryError::EntryLimitExceeded { entry_limit } => write!(
+                f,
+                "When trying to add an entry, entry number limit \
+                 ({} entries) was exceeded",
+                entry_limit
+            ),
+            CreateEntryError::EmptyJournal => write!(
+                f,
+                "Tried to add an entry to a journal with no entries; \
+                 the journal was created incorrectly"
+            ),
+            CreateEntryError::UntrustedIssuer => write!(
+                f,
+                "Entry issuer is not on the list of trusted devices \
+                 and thus is not allowed to add entries to the journal"
+            ),
+        }
+    }
+}
+
+impl Error for CreateEntryError {
+    fn description(&self) -> &str {
+        "CreateEntryError"
     }
 }
 
@@ -87,25 +164,27 @@ impl FullJournal {
         operation: Operation,
         issuer_pk: &PublicKey,
         issuer_sk: &SecretKey,
-    ) -> Option<JournalEntry> {
+    ) -> Result<JournalEntry, CreateEntryError> {
         // TODO: separate out this check because it's used in more than one
         // place, I think
         let devices = self.trusted_devices.len();
         match operation {
             Operation::ClientAdd { subject, .. } => {
                 if devices >= MAX_DEVICES {
-                    return None;
+                    return Err(CreateEntryError::DeviceLimitExceeded {
+                        device_limit: MAX_DEVICES as u32,
+                    });
                 };
                 if self.trusted_devices.contains_key(&subject) {
-                    return None;
+                    return Err(CreateEntryError::DeviceAlreadyTrusted);
                 };
             }
             Operation::ClientRemove { subject, .. } => {
-                if devices < 2 {
-                    return None;
+                if devices <= 1 {
+                    return Err(CreateEntryError::LastDevice);
                 };
                 if !self.trusted_devices.contains_key(&subject) {
-                    return None;
+                    return Err(CreateEntryError::DeviceNotFound);
                 };
             }
             Operation::ClientReplace {
@@ -114,19 +193,24 @@ impl FullJournal {
                 ..
             } => {
                 if !self.trusted_devices.contains_key(&removed_subject) {
-                    return None;
+                    return Err(CreateEntryError::DeviceNotFound);
                 };
                 if self.trusted_devices.contains_key(&added_subject) {
-                    return None;
+                    return Err(CreateEntryError::DeviceAlreadyTrusted);
                 };
             }
         }
-        if self.entries.len() >= u32::max_value() as usize
-            || self.entries.is_empty()
-            || !self.trusted_devices.contains_key(issuer_pk)
-        {
-            return None;
-        }
+        if self.entries.len() >= u32::max_value() as usize {
+            return Err(CreateEntryError::EntryLimitExceeded {
+                entry_limit: u32::max_value(),
+            });
+        };
+        if self.entries.is_empty() {
+            return Err(CreateEntryError::EmptyJournal);
+        };
+        if !self.trusted_devices.contains_key(issuer_pk) {
+            return Err(CreateEntryError::UntrustedIssuer);
+        };
         let last_entry = self.entries.last().unwrap();
         let mut entry = JournalEntry::new(
             self.journal_id,
@@ -136,7 +220,7 @@ impl FullJournal {
             *issuer_pk,
         );
         entry.signature = entry.sign(issuer_sk);
-        Some(entry)
+        Ok(entry)
     }
 
     // pub fn create_add_permanent_device() {}

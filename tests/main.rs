@@ -272,13 +272,10 @@ fn fuzz_testing() {
         match rl.create_entry(operation.clone(),
                               iss_pk,
                               iss_sk) {
-            None => {
-                // TODO: this chokes on replace operations, but shouldn't.  (always?  often?)
-                println!("Couldn't create new entry. Number of trusted devices: {}",
-                         trusted.len());
-                continue;
+            Err(e) => {
+                panic!("Couldn't create new entry: {}", e);
             }
-            Some(mut new_entry) => {
+            Ok(mut new_entry) => {
                 let subject_signature = new_entry.sign(sub_sk);
                 new_entry.operation.set_subject_signature(subject_signature);
                 assert!(rl.can_add_entry(&new_entry));
