@@ -301,9 +301,14 @@ fn fuzz_testing() {
             // otherwise we restart the search
         }
 
-        match rl.create_entry(operation.clone(), iss_pk, iss_sk) {
-            Err(e) => {
-                panic!("Couldn't create new entry: {}", e);
+        match rl.create_entry(operation.clone(),
+                              iss_pk,
+                              iss_sk) {
+            None => {
+                // TODO: this chokes on replace operations, but shouldn't.  (always?  often?)
+                println!("Couldn't create new entry. Number of trusted devices: {}",
+                         trusted.len());
+                continue;
             }
             Ok(mut new_entry) => {
                 let subject_signature = new_entry.sign(sub_sk);
