@@ -374,7 +374,7 @@ impl FullJournal {
                     );
                 }
                 Operation::ClientSelfReplace { added_subject, .. } => {
-                    let mut current_device = self
+                    let current_device = self
                         .get_trusted_device(&entry.issuer)
                         .unwrap()
                         .clone();
