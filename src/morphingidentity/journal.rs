@@ -248,7 +248,7 @@ impl FullJournal {
             // `create_entry`.  there may be a reason for that, but
             // probably not.
             Operation::ClientAdd { .. } if devices >= MAX_DEVICES => false,
-            Operation::ClientRemove { .. } if devices < 1 => false,
+            Operation::ClientRemove { .. } if devices <= 1 => false,
             Operation::ClientAdd {
                 subject,
                 subject_signature,
