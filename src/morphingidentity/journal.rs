@@ -45,7 +45,7 @@ pub enum CreateEntryError {
     LastDevice,
     /// *Removal or replacement:* you're trying to remove a device that is
     /// not in the journal.
-    DeviceNotFound,
+    SubjectNotFound,
     /// *Any entry:* the journal can only hold `entry_limit` entries.
     EntryLimitExceeded { entry_limit: u32 },
     /// *Any entry:* it's impossible to add an entry to a journal with no
@@ -76,7 +76,7 @@ impl fmt::Display for CreateEntryError {
             CreateEntryError::LastDevice => {
                 write!(f, "Removing the last trusted device is not allowed")
             }
-            CreateEntryError::DeviceNotFound => write!(
+            CreateEntryError::SubjectNotFound => write!(
                 f,
                 "Trying to remove or replace a device \
                  that is not in the journal"
@@ -184,7 +184,7 @@ impl FullJournal {
                     return Err(CreateEntryError::LastDevice);
                 };
                 if !self.trusted_devices.contains_key(&subject) {
-                    return Err(CreateEntryError::DeviceNotFound);
+                    return Err(CreateEntryError::SubjectNotFound);
                 };
             }
             Operation::ClientReplace {
@@ -193,7 +193,7 @@ impl FullJournal {
                 ..
             } => {
                 if !self.trusted_devices.contains_key(&removed_subject) {
-                    return Err(CreateEntryError::DeviceNotFound);
+                    return Err(CreateEntryError::SubjectNotFound);
                 };
                 if self.trusted_devices.contains_key(&added_subject) {
                     return Err(CreateEntryError::DeviceAlreadyTrusted);
