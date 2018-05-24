@@ -201,7 +201,7 @@ impl FullJournal {
             }
             Operation::ClientSelfReplace { added_subject, .. } => {
                 if self.trusted_devices.contains_key(&added_subject) {
-                    return None;
+                    return Err(CreateEntryError::DeviceAlreadyTrusted);
                 };
             }
         }
