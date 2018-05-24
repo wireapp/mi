@@ -207,11 +207,12 @@ impl Operation {
 }
 
 #[repr(u32)]
+#[cfg_attr(rustfmt, rustfmt_skip)]
 pub enum CapType {
-    AddCap = 0b001u32,
-    RemoveCap = 0b010u32,
-    NonRemovableCap = 0b100u32,
-    SelfUpdateCap = 0b101u32,
+    AddCap          = 0b0001u32,
+    RemoveCap       = 0b0010u32,
+    NonRemovableCap = 0b0100u32,
+    SelfUpdateCap   = 0b1000u32,
 }
 #[repr(u32)]
 pub enum DeviceType {
