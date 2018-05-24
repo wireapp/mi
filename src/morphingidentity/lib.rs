@@ -1,12 +1,14 @@
-#[macro_use] pub mod cbor_utils;
-pub mod journal;
-pub mod entries;
-pub mod store;
-pub mod snapshot;
+#[macro_use]
+pub mod cbor_utils;
 pub mod dtag;
-pub mod utils;
+pub mod entries;
+pub mod journal;
 pub mod rand_utils;
+pub mod short_journal;
+pub mod snapshot;
+pub mod store;
+pub mod utils;
 
-extern crate sodiumoxide;
 extern crate cbor;
+extern crate sodiumoxide;
 extern crate uuid;
