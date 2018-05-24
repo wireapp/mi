@@ -1,7 +1,7 @@
 pub use sodiumoxide::randombytes::randombytes;
 
-use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::hash::sha256;
+use sodiumoxide::crypto::sign;
 use uuid;
 
 /// This random generator should be used instead of `rand` and the rest
@@ -17,13 +17,15 @@ pub trait GoodRand {
 pub fn randomnumber(n: u64) -> u64 {
     // We want to avoid modulo bias, so we use the arc4random_uniform
     // implementation (http://stackoverflow.com/a/20051580/615030).
-    if n < 2 { return 0; }
-    let min: u64 = n.wrapping_neg() % n;   // 2^64 mod n == (2^64 - n) mod n
+    if n < 2 {
+        return 0;
+    }
+    let min: u64 = n.wrapping_neg() % n; // 2^64 mod n == (2^64 - n) mod n
     let mut r: u64 = GoodRand::rand();
     while r < min {
         r = GoodRand::rand();
     }
-    return r % n;
+    r % n
 }
 
 // implementations of GoodRand /////////////////////////////////////////////
@@ -37,25 +39,31 @@ impl GoodRand for u8 {
 impl GoodRand for u16 {
     fn rand() -> u16 {
         let x = randombytes(2);
-        (x[0] as u16) | ((x[1] as u16) << 8)
+        u16::from(x[0]) | (u16::from(x[1]) << 8)
     }
 }
 
 impl GoodRand for u32 {
     fn rand() -> u32 {
         let x = randombytes(4);
-        (x[0] as u32) | ((x[1] as u32) << 8) | ((x[2] as u32) << 16)
-            | ((x[3] as u32) << 24)
+        u32::from(x[0])
+            | (u32::from(x[1]) << 8)
+            | (u32::from(x[2]) << 16)
+            | (u32::from(x[3]) << 24)
     }
 }
 
 impl GoodRand for u64 {
     fn rand() -> u64 {
         let x = randombytes(8);
-        (x[0] as u64) | ((x[1] as u64) << 8) | ((x[2] as u64) << 16)
-            | ((x[3] as u64) << 24) | ((x[4] as u64) << 32)
-            | ((x[5] as u64) << 40) | ((x[6] as u64) << 48)
-            | ((x[7] as u64) << 56)
+        u64::from(x[0])
+            | (u64::from(x[1]) << 8)
+            | (u64::from(x[2]) << 16)
+            | (u64::from(x[3]) << 24)
+            | (u64::from(x[4]) << 32)
+            | (u64::from(x[5]) << 40)
+            | (u64::from(x[6]) << 48)
+            | (u64::from(x[7]) << 56)
     }
 }
 
