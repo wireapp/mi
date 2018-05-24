@@ -512,21 +512,21 @@ mod tests {
     /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
         match <u32 as GoodRand>::rand() % OPERATIONS {
-            0 => Operation::ClientAdd {
+            TAG_CLIENT_ADD => Operation::ClientAdd {
                 capabilities: GoodRand::rand(),
                 subject: GoodRand::rand(),
                 subject_signature: GoodRand::rand(),
             },
-            1 => Operation::ClientRemove {
+            TAG_CLIENT_REMOVE => Operation::ClientRemove {
                 subject: GoodRand::rand(),
             },
-            2 => Operation::ClientReplace {
+            TAG_CLIENT_REPLACE => Operation::ClientReplace {
                 removed_subject: GoodRand::rand(),
                 capabilities: GoodRand::rand(),
                 added_subject: GoodRand::rand(),
                 added_subject_signature: GoodRand::rand(),
             },
-            3 => Operation::ClientSelfReplace {
+            TAG_CLIENT_SELF_REPLACE => Operation::ClientSelfReplace {
                 added_subject: GoodRand::rand(),
                 added_subject_signature: GoodRand::rand(),
             },
