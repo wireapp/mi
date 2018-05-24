@@ -17,21 +17,10 @@ use morphingidentity::rand_utils::GoodRand;
 
 const MAX_DEVICES: usize = 8;
 
-/// This is the main function
-fn main() {
-    init();
-    entry_test();
-    entry_addition_test();
-    fuzz_testing();
-}
-
-/// Initialize crypto, etc.
-fn init() {
-    sodiumoxide::init();
-}
-
 /// Test that an entry can be created and signed.
+#[test]
 fn entry_test() {
+    sodiumoxide::init();
     let (issuer_pk, issuer_sk) = sign::gen_keypair();
     let (subject_pk, subject_sk) = sign::gen_keypair();
     let operation = Operation::ClientAdd {
@@ -57,7 +46,9 @@ fn entry_test() {
 }
 
 /// Test that a journal can be created and an entry can be added to it.
+#[test]
 fn entry_addition_test() {
+    sodiumoxide::init();
     let id = GoodRand::rand();
 
     // Generate keys for two devices: Issuer and Subject.
@@ -177,7 +168,9 @@ fn entry_addition_test() {
 }
 
 /// Build a long journal with random entries and do some fuzzing
+#[test]
 fn fuzz_testing() {
+    sodiumoxide::init();
     println!("-------- Random journal ---------");
     println!("Generating {} entries", ITER);
 
@@ -279,13 +272,10 @@ fn fuzz_testing() {
         match rl.create_entry(operation.clone(),
                               iss_pk,
                               iss_sk) {
-            None => {
-                // TODO: this chokes on replace operations, but shouldn't.  (always?  often?)
-                println!("Couldn't create new entry. Number of trusted devices: {}",
-                         trusted.len());
-                continue;
+            Err(e) => {
+                panic!("Couldn't create new entry: {}", e);
             }
-            Some(mut new_entry) => {
+            Ok(mut new_entry) => {
                 let subject_signature = new_entry.sign(sub_sk);
                 new_entry.operation.set_subject_signature(subject_signature);
                 assert!(rl.can_add_entry(&new_entry));

@@ -420,7 +420,7 @@ pub struct EntryExtension {
 }
 
 impl EntryExtension {
-    pub fn get_hash(&mut self) -> Digest {
+    pub fn hash(&mut self) -> Digest {
         self.permanent_subject_publickeys.sort();
         hash(&run_encoder(&|e| {
             e.u32(self.format_version)?;

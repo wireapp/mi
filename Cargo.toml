@@ -15,7 +15,3 @@ features = ["std"]
 [lib]
 name = "morphingidentity"
 path = "src/morphingidentity/lib.rs"
-
-[[bin]]
-name = "main"
-path = "src/test/main.rs"
