@@ -43,13 +43,28 @@ pub enum Operation {
         /// A signature by the client.
         added_subject_signature: Signature,
     },
+
+    /// Atomically update the key material of a client.
+    ClientSelfReplace {
+        /// New public key that is being added.
+        added_subject: PublicKey,
+        /// A signature by the client.
+        added_subject_signature: Signature,
+    },
     // NB. When adding new types, don't forget to:
     //   * update `OPERATIONS`
     //   * update `rand_operation` in unit tests
+    //   * update the corresponding tag
 }
 
 /// Number of different operations that we have currently.
-pub const OPERATIONS: u32 = 3;
+pub const OPERATIONS: u32 = 4;
+
+/// Tags used for CBOR encoding/decoding
+pub const TAG_CLIENT_ADD: u32 = 0;
+pub const TAG_CLIENT_REMOVE: u32 = 1;
+pub const TAG_CLIENT_REPLACE: u32 = 2;
+pub const TAG_CLIENT_SELF_REPLACE: u32 = 3;
 
 impl Operation {
     pub fn set_subject_signature(&mut self, signature: Signature) {
@@ -67,6 +82,12 @@ impl Operation {
             } => {
                 *added_subject_signature = signature;
             }
+            Operation::ClientSelfReplace {
+                ref mut added_subject_signature,
+                ..
+            } => {
+                *added_subject_signature = signature;
+            }
         }
     }
 
@@ -78,7 +99,7 @@ impl Operation {
                 subject_signature,
             } => {
                 e.array(4)?;
-                e.u32(0)?; // tag 0
+                e.u32(TAG_CLIENT_ADD)?;
                 e.u32(capabilities)?;
                 e.bytes(&subject[..])?;
                 e.bytes(&subject_signature[..])?;
@@ -86,7 +107,7 @@ impl Operation {
             }
             Operation::ClientRemove { subject } => {
                 e.array(2)?;
-                e.u32(1)?; // tag 1
+                e.u32(TAG_CLIENT_REMOVE)?;
                 e.bytes(&subject[..])?;
                 Ok(())
             }
@@ -97,9 +118,19 @@ impl Operation {
                 added_subject_signature,
             } => {
                 e.array(5)?;
-                e.u32(2)?; // tag 2
+                e.u32(TAG_CLIENT_REPLACE)?;
                 e.bytes(&removed_subject[..])?;
                 e.u32(capabilities)?;
+                e.bytes(&added_subject[..])?;
+                e.bytes(&added_subject_signature[..])?;
+                Ok(())
+            }
+            Operation::ClientSelfReplace {
+                added_subject,
+                added_subject_signature,
+            } => {
+                e.array(3)?;
+                e.u32(TAG_CLIENT_SELF_REPLACE)?;
                 e.bytes(&added_subject[..])?;
                 e.bytes(&added_subject_signature[..])?;
                 Ok(())
@@ -113,7 +144,7 @@ impl Operation {
         let len = d.array()?;
         let tag = d.u32()?;
         match tag {
-            0 => {
+            TAG_CLIENT_ADD => {
                 if len != 4 {
                     return Err(MIDecodeError::InvalidArrayLength {
                         type_name: "Operation::ClientAdd",
@@ -127,7 +158,7 @@ impl Operation {
                     subject_signature: decode_signature(d)?,
                 })
             }
-            1 => {
+            TAG_CLIENT_REMOVE => {
                 if len != 2 {
                     return Err(MIDecodeError::InvalidArrayLength {
                         type_name: "Operation::ClientRemove",
@@ -139,7 +170,7 @@ impl Operation {
                     subject: decode_publickey(d)?,
                 })
             }
-            2 => {
+            TAG_CLIENT_REPLACE => {
                 if len != 5 {
                     return Err(MIDecodeError::InvalidArrayLength {
                         type_name: "Operation::ClientReplace",
@@ -154,6 +185,19 @@ impl Operation {
                     added_subject_signature: decode_signature(d)?,
                 })
             }
+            TAG_CLIENT_SELF_REPLACE => {
+                if len != 3 {
+                    return Err(MIDecodeError::InvalidArrayLength {
+                        type_name: "Operation::ClientSelfReplace",
+                        expected_length: 3,
+                        actual_length: len,
+                    }.into());
+                }
+                Ok(Operation::ClientSelfReplace {
+                    added_subject: decode_publickey(d)?,
+                    added_subject_signature: decode_signature(d)?,
+                })
+            }
             _ => Err(MIDecodeError::UnknownOperation {
                 found_tag: tag,
                 max_known_tag: OPERATIONS - 1,
@@ -163,10 +207,12 @@ impl Operation {
 }
 
 #[repr(u32)]
+#[cfg_attr(rustfmt, rustfmt_skip)]
 pub enum CapType {
-    AddCap = 0b001u32,
-    RemoveCap = 0b010u32,
-    NonRemovableCap = 0b100u32,
+    AddCap          = 0b0001u32,
+    RemoveCap       = 0b0010u32,
+    NonRemovableCap = 0b0100u32,
+    SelfUpdateCap   = 0b1000u32,
 }
 #[repr(u32)]
 pub enum DeviceType {
@@ -197,6 +243,10 @@ impl ClientInfo {
     /// Is it true that the client can not be removed from the journal?
     pub fn capability_cannot_be_removed(&self) -> bool {
         (self.capabilities & CapType::NonRemovableCap as u32) > 0
+    }
+    /// Can the client self-update?
+    pub fn capability_can_self_update(&self) -> bool {
+        (self.capabilities & CapType::SelfUpdateCap as u32) > 0
     }
 }
 
@@ -297,7 +347,7 @@ impl JournalEntry {
     }
 
     /// Return a hash of the entry with signatures set to some default
-    /// values.
+    /// value.
     pub fn partial_hash(&self) -> Digest {
         let mut partial = self.clone();
         partial.signature = EMPTYSIGNATURE;
@@ -462,17 +512,21 @@ mod tests {
     /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
         match <u32 as GoodRand>::rand() % OPERATIONS {
-            0 => Operation::ClientAdd {
+            TAG_CLIENT_ADD => Operation::ClientAdd {
                 capabilities: GoodRand::rand(),
                 subject: GoodRand::rand(),
                 subject_signature: GoodRand::rand(),
             },
-            1 => Operation::ClientRemove {
+            TAG_CLIENT_REMOVE => Operation::ClientRemove {
                 subject: GoodRand::rand(),
             },
-            2 => Operation::ClientReplace {
+            TAG_CLIENT_REPLACE => Operation::ClientReplace {
                 removed_subject: GoodRand::rand(),
                 capabilities: GoodRand::rand(),
+                added_subject: GoodRand::rand(),
+                added_subject_signature: GoodRand::rand(),
+            },
+            TAG_CLIENT_SELF_REPLACE => Operation::ClientSelfReplace {
                 added_subject: GoodRand::rand(),
                 added_subject_signature: GoodRand::rand(),
             },
