@@ -19,3 +19,8 @@ pub struct Snapshot {
     /// that the entry encodes to)
     pub advanced_hash: Digest,
 }
+
+/// The Distribution Tag is included in the Proteus message envelope to force journal updates on the receiving end.
+pub struct DistributionTag {
+    pub journal_snapshot: Snapshot,
+}

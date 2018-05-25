@@ -110,3 +110,23 @@ impl GoodRand for uuid::Uuid {
         uuid::Uuid::from_bytes(randombytes(16).as_slice()).unwrap()
     }
 }
+
+#[test]
+fn distribution_test() {
+    const ITERATIONS: usize = 1_000_000;
+    const SPREAD: u64 = 5;
+    const TOLERANCE: f64 = 0.01; // 1 percent
+    let mut buckets = vec![0, 0, 0, 0, 0];
+    for _ in 0..ITERATIONS {
+        let n = randomnumber(SPREAD) as usize;
+        buckets[n] += 1;
+    }
+
+    for i in 0..SPREAD {
+        let deviation: i32 =
+            buckets[i as usize] - (ITERATIONS as i32 / SPREAD as i32);
+        let relative_deviation =
+            deviation.abs() as f64 / (ITERATIONS as f64 / SPREAD as f64);
+        assert!(relative_deviation < TOLERANCE);
+    }
+}

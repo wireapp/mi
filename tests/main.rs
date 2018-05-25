@@ -1,23 +1,17 @@
 extern crate cbor;
+extern crate morphingidentity;
 extern crate sodiumoxide;
 extern crate uuid;
-
-extern crate morphingidentity;
-
-use uuid::Uuid;
-
-use sodiumoxide::crypto::hash;
-use sodiumoxide::crypto::sign;
 
 use morphingidentity::entries::{
     DeviceType, JournalEntry, Operation, OPERATIONS,
 };
 use morphingidentity::journal::FullJournal;
-
-use morphingidentity::rand_utils::GoodRand;
+use morphingidentity::rand_utils::{randomnumber, GoodRand};
 use morphingidentity::utils::EMPTYSIGNATURE;
-
-const MAX_DEVICES: usize = 8;
+use sodiumoxide::crypto::hash;
+use sodiumoxide::crypto::sign;
+use uuid::Uuid;
 
 /// Test that an entry can be created and signed.
 #[test]
@@ -200,31 +194,28 @@ fn fuzz_testing() {
     println!("Generating {} entries", ITER);
 
     const DEVICES: usize = 8;
-    const ITER: u32 = 10_000;
+    const ITER: u32 = 10;
 
     let mut sec_keys = Vec::new();
     let mut pub_keys = Vec::new();
 
+    // Create a pool of devices we can add and remove
     for _i in 0..DEVICES {
         let (p_key, s_key) = sign::gen_keypair();
         sec_keys.push(s_key);
         pub_keys.push(p_key);
     }
 
-    let mut rl =
+    let mut random_journal =
         FullJournal::new(GoodRand::rand(), &pub_keys[0], &sec_keys[0])
             .unwrap();
 
     for _i in 0..ITER - 1 {
-        let trusted = rl.get_trusted_devices().clone();
+        let trusted = random_journal.get_trusted_devices().clone();
         let mut issuer;
         let mut counter;
         let mut iss_pk = &sign::PublicKey([0; sign::PUBLICKEYBYTES]);
         let mut iss_sk;
-        let mut sub_pk;
-        let mut sub_sk;
-        let mut sub_added_pk;
-        let mut operation;
 
         // Let's generate an entry that makes sense: either it's an entry
         // that adds a device which isn't in journal yet (assuming that the
@@ -234,8 +225,8 @@ fn fuzz_testing() {
         // can replace another with a new one.
         loop {
             // pick a trusted issuer.
-            let mut c =
-                <usize as GoodRand>::rand() % (trusted.len() as usize);
+            let mut c = randomnumber(trusted.len() as u64) as usize;
+            //<usize as GoodRand>::rand() % (trusted.len() as usize);
             counter = 0;
             for e in trusted.values() {
                 if counter == c {
@@ -255,16 +246,221 @@ fn fuzz_testing() {
 
             // construct a random, sound operation.
             iss_sk = &sec_keys[found_index.0];
-            c = <usize as GoodRand>::rand() % DEVICES;
-            sub_sk = &sec_keys[c];
-            sub_pk = &pub_keys[c];
 
-            if (<u32 as GoodRand>::rand() % OPERATIONS) == 0 &&
+            // Pick a random operation
+            let next_operation_index = randomnumber(OPERATIONS as u64);
+
+            match next_operation_index {
+                0 => {
+                    // Adding a new device from the pool
+                    let mut inner_counter = 0;
+                    loop {
+                        let subject_index =
+                            randomnumber(DEVICES as u64) as usize;
+                        let subject_secret_key = &sec_keys[subject_index];
+                        let subject_public_key = &pub_keys[subject_index];
+
+                        let next_operation = Operation::DeviceAdd {
+                            subject: *subject_public_key,
+                            subject_signature: EMPTYSIGNATURE,
+                            capabilities: DeviceType::PermanentDevice
+                                as u32,
+                        };
+
+                        match random_journal.create_entry(
+                            next_operation.clone(),
+                            iss_pk,
+                            iss_sk,
+                        ) {
+                            Err(_) => {
+                                // We picked the wrong subject or operation
+                                inner_counter += 1;
+                                if inner_counter > 100 {
+                                    break;
+                                } else {
+                                    continue;
+                                }
+                            }
+                            Ok(mut new_entry) => {
+                                let subject_signature =
+                                    new_entry.sign(subject_secret_key);
+                                new_entry.operation.set_subject_signature(
+                                    subject_signature,
+                                );
+                                assert!(
+                                    random_journal
+                                        .can_add_entry(&new_entry)
+                                );
+                                assert!(
+                                    random_journal.add_entry(new_entry)
+                                );
+                                counter += 1;
+                                println!("Adding a new device");
+                                break;
+                            }
+                        };
+                    }
+                }
+                1 => {
+                    let mut inner_counter = 0;
+                    loop {
+                        // Removing a trusted device
+                        let subject_index =
+                            randomnumber(DEVICES as u64) as usize;
+                        let subject_public_key = &pub_keys[subject_index];
+
+                        let next_operation = Operation::DeviceRemove {
+                            subject: *subject_public_key,
+                        };
+
+                        match random_journal.create_entry(
+                            next_operation.clone(),
+                            iss_pk,
+                            iss_sk,
+                        ) {
+                            Err(_) => {
+                                // We picked the wrong subject or operation
+                                inner_counter += 1;
+                                if inner_counter > 100 {
+                                    break;
+                                } else {
+                                    continue;
+                                }
+                            }
+                            Ok(mut new_entry) => {
+                                assert!(
+                                    random_journal
+                                        .can_add_entry(&new_entry)
+                                );
+                                assert!(
+                                    random_journal.add_entry(new_entry)
+                                );
+                                counter += 1;
+                                println!("Removing a device");
+                                break;
+                            }
+                        };
+                    }
+                }
+                2 => {
+                    let mut inner_counter = 0;
+                    loop {
+                        // Replacing an existing trusted device
+                        let added_subject_index =
+                            randomnumber(DEVICES as u64) as usize;
+                        let added_subject_secret_key =
+                            &sec_keys[added_subject_index];
+                        let added_subject_public_key =
+                            &pub_keys[added_subject_index];
+                        let removed_subject_index =
+                            randomnumber(DEVICES as u64) as usize;
+                        let removed_subject_public_key =
+                            &pub_keys[removed_subject_index];
+
+                        let next_operation = Operation::DeviceReplace {
+                            added_subject: *added_subject_public_key,
+                            removed_subject: *removed_subject_public_key,
+                            added_subject_signature: EMPTYSIGNATURE,
+                            capabilities: DeviceType::PermanentDevice
+                                as u32,
+                        };
+
+                        match random_journal.create_entry(
+                            next_operation.clone(),
+                            iss_pk,
+                            iss_sk,
+                        ) {
+                            Err(_) => {
+                                // We picked the wrong subject or operation
+                                inner_counter += 1;
+                                if inner_counter > 100 {
+                                    break;
+                                } else {
+                                    continue;
+                                }
+                            }
+                            Ok(mut new_entry) => {
+                                let added_subject_signature = new_entry
+                                    .sign(added_subject_secret_key);
+                                new_entry.operation.set_subject_signature(
+                                    added_subject_signature,
+                                );
+                                assert!(
+                                    random_journal
+                                        .can_add_entry(&new_entry)
+                                );
+                                assert!(
+                                    random_journal.add_entry(new_entry)
+                                );
+                                counter += 1;
+                                println!("Replacing a device");
+                                break;
+                            }
+                        };
+                    }
+                }
+                3 => {
+                    let mut inner_counter = 0;
+                    loop {
+                        // Self-replacing an existing trusted device
+                        let added_subject_index =
+                            randomnumber(DEVICES as u64) as usize;
+                        let added_subject_secret_key =
+                            &sec_keys[added_subject_index];
+                        let added_subject_public_key =
+                            &pub_keys[added_subject_index];
+
+                        let next_operation = Operation::DeviceSelfReplace {
+                            added_subject: *added_subject_public_key,
+                            added_subject_signature: EMPTYSIGNATURE,
+                        };
+
+                        match random_journal.create_entry(
+                            next_operation.clone(),
+                            iss_pk,
+                            iss_sk,
+                        ) {
+                            Err(_) => {
+                                // We picked the wrong subject or operation
+                                inner_counter += 1;
+                                if inner_counter > 100 {
+                                    break;
+                                } else {
+                                    continue;
+                                }
+                            }
+                            Ok(mut new_entry) => {
+                                let added_subject_signature = new_entry
+                                    .sign(added_subject_secret_key);
+                                new_entry.operation.set_subject_signature(
+                                    added_subject_signature,
+                                );
+                                assert!(
+                                    random_journal
+                                        .can_add_entry(&new_entry)
+                                );
+                                assert!(
+                                    random_journal.add_entry(new_entry)
+                                );
+                                counter += 1;
+                                println!("Self-replacing a device");
+                                break;
+                            }
+                        };
+                    }
+                }
+                _ => unreachable!(),
+            };
+            if counter > 0 {
+                break;
+            }
+            /*
+            if (randomnumber(OPERATIONS as u64)) == 0 &&
                 trusted.contains_key(sub_pk) && trusted.len() > 1 &&  // TODO: should be `trusted.len() >= 1`!
                 trusted.len() < MAX_DEVICES
             {
                 loop {
-                    let c2 = <usize as GoodRand>::rand() % DEVICES;
+                    let c2 = randomnumber(DEVICES as u64) as usize;
                     if c2 != c {
                         continue; // device cannot replace itself.  TODO: should be allowed!
                     }
@@ -313,20 +509,24 @@ fn fuzz_testing() {
                 assert!(rl.can_add_entry(&new_entry));
                 assert!(rl.add_entry(new_entry));
             }
+            */
         }
     }
+
     println!(
         "Permanent hash: {}",
-        morphingidentity::utils::fmt_hex(&rl.get_permanent_hash()[..])
+        morphingidentity::utils::fmt_hex(
+            &random_journal.get_permanent_hash()[..]
+        )
     );
-    for (pk, j) in &rl.get_trusted_devices() {
+    for (pk, j) in &random_journal.get_trusted_devices() {
         println!("Trusted devices: Subject PublicKey: {}, Issuer PublicKey {}, count {}",
                  morphingidentity::utils::fmt_hex(&pk[..]),
                  morphingidentity::utils::fmt_hex(&j.entry.issuer[..]),
                  j.entry.index);
         let mut pe = j.entry.clone();
         print!("Parent(s): ");
-        while let Some(x) = rl.get_parent(&pe) {
+        while let Some(x) = random_journal.get_parent(&pe) {
             pe = (*x).clone();
             if pe.index == 0 {
                 println!("root.");
@@ -351,5 +551,5 @@ fn fuzz_testing() {
         // }
         //
     }
-    assert!(rl.check_journal());
+    assert!(random_journal.check_journal());
 }

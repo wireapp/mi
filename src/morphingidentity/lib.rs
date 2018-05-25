@@ -1,6 +1,5 @@
 #[macro_use]
 pub mod cbor_utils;
-pub mod dtag;
 pub mod entries;
 pub mod journal;
 pub mod rand_utils;
