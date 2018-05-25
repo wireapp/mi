@@ -25,7 +25,7 @@ fn entry_test() {
     sodiumoxide::init();
     let (issuer_pk, issuer_sk) = sign::gen_keypair();
     let (subject_pk, subject_sk) = sign::gen_keypair();
-    let operation = Operation::ClientAdd {
+    let operation = Operation::DeviceAdd {
         subject: subject_pk,
         subject_signature: EMPTYSIGNATURE,
         capabilities: DeviceType::PermanentDevice as u32,
@@ -86,7 +86,7 @@ fn entry_addition_test() {
     // Add a device (Subject) and do some tests /////////////////////////////
 
     // Prepare the new entry
-    let second_operation = Operation::ClientAdd {
+    let second_operation = Operation::DeviceAdd {
         subject: subject_pk,
         subject_signature: EMPTYSIGNATURE,
         capabilities: DeviceType::PermanentDevice as u32,
@@ -148,7 +148,7 @@ fn entry_addition_test() {
     // Remove Subject and do more tests /////////////////////////////////////
 
     // Preparing a new entry to remove the second device
-    let third_operation = Operation::ClientRemove {
+    let third_operation = Operation::DeviceRemove {
         subject: subject_pk,
     };
     let third_entry = full_journal
@@ -277,7 +277,7 @@ fn fuzz_testing() {
                     break;
                 }
 
-                operation = Operation::ClientReplace {
+                operation = Operation::DeviceReplace {
                     removed_subject: *sub_pk,
                     capabilities: DeviceType::PermanentDevice as u32,
                     added_subject: *sub_added_pk,
@@ -286,12 +286,12 @@ fn fuzz_testing() {
                 break; // found it!
             }
             if trusted.contains_key(sub_pk) && trusted.len() > 1 {
-                operation = Operation::ClientRemove { subject: *sub_pk };
+                operation = Operation::DeviceRemove { subject: *sub_pk };
                 break; // found it!
             }
             if !trusted.contains_key(sub_pk) && trusted.len() < MAX_DEVICES
             {
-                operation = Operation::ClientAdd {
+                operation = Operation::DeviceAdd {
                     subject: *sub_pk,
                     subject_signature: EMPTYSIGNATURE,
                     capabilities: DeviceType::PermanentDevice as u32,

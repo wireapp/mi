@@ -29,7 +29,7 @@ impl ShortJournal {
         }
         match le.operation {
             // TODO code duplication, see TODOs above.
-            Operation::ClientAdd {
+            Operation::DeviceAdd {
                 subject,
                 subject_signature,
                 ..
@@ -39,12 +39,12 @@ impl ShortJournal {
                     && le.verify_signature(&le.issuer, &le.signature)
                     && le.verify_signature(&subject, &subject_signature)
             }
-            Operation::ClientRemove { subject, .. } => {
+            Operation::DeviceRemove { subject, .. } => {
                 self.trusted_devices.contains_key(&le.issuer)
                     && self.trusted_devices.contains_key(&subject)
                     && le.verify_signature(&le.issuer, &le.signature)
             }
-            Operation::ClientReplace {
+            Operation::DeviceReplace {
                 removed_subject,
                 added_subject,
                 added_subject_signature,
@@ -60,7 +60,7 @@ impl ShortJournal {
                         &added_subject_signature,
                     )
             }
-            Operation::ClientSelfReplace {
+            Operation::DeviceSelfReplace {
                 added_subject,
                 added_subject_signature,
                 ..
@@ -82,13 +82,13 @@ impl ShortJournal {
         if self.can_add_entry(&le) {
             self.entry = le.clone();
             match le.operation {
-                Operation::ClientAdd { subject, .. } => {
+                Operation::DeviceAdd { subject, .. } => {
                     self.trusted_devices.insert(subject, le);
                 }
-                Operation::ClientRemove { subject, .. } => {
+                Operation::DeviceRemove { subject, .. } => {
                     self.trusted_devices.remove(&subject);
                 }
-                Operation::ClientReplace {
+                Operation::DeviceReplace {
                     removed_subject,
                     added_subject,
                     ..
@@ -96,7 +96,7 @@ impl ShortJournal {
                     self.trusted_devices.remove(&removed_subject);
                     self.trusted_devices.insert(added_subject, le);
                 }
-                Operation::ClientSelfReplace { added_subject, .. } => {
+                Operation::DeviceSelfReplace { added_subject, .. } => {
                     self.trusted_devices.remove(&le.issuer);
                     self.trusted_devices.insert(added_subject, le);
                 }
