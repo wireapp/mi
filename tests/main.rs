@@ -3,9 +3,7 @@ extern crate morphingidentity;
 extern crate sodiumoxide;
 extern crate uuid;
 
-use morphingidentity::entries::{
-    DeviceType, JournalEntry, Operation, OPERATIONS,
-};
+use morphingidentity::entries::*;
 use morphingidentity::journal::FullJournal;
 use morphingidentity::rand_utils::{randomnumber, GoodRand};
 use morphingidentity::utils::EMPTYSIGNATURE;
@@ -226,7 +224,6 @@ fn fuzz_testing() {
         loop {
             // pick a trusted issuer.
             let mut c = randomnumber(trusted.len() as u64) as usize;
-            //<usize as GoodRand>::rand() % (trusted.len() as usize);
             counter = 0;
             for e in trusted.values() {
                 if counter == c {
@@ -248,10 +245,11 @@ fn fuzz_testing() {
             iss_sk = &sec_keys[found_index.0];
 
             // Pick a random operation
-            let next_operation_index = randomnumber(OPERATIONS as u64);
+            let next_operation_index =
+                randomnumber(OPERATIONS as u64) as u32;
 
             match next_operation_index {
-                0 => {
+                TAG_DEVICE_ADD => {
                     // Adding a new device from the pool
                     let mut inner_counter = 0;
                     loop {
@@ -301,7 +299,7 @@ fn fuzz_testing() {
                         };
                     }
                 }
-                1 => {
+                TAG_DEVICE_REMOVE => {
                     let mut inner_counter = 0;
                     loop {
                         // Removing a trusted device
@@ -327,7 +325,7 @@ fn fuzz_testing() {
                                     continue;
                                 }
                             }
-                            Ok(mut new_entry) => {
+                            Ok(new_entry) => {
                                 assert!(
                                     random_journal
                                         .can_add_entry(&new_entry)
@@ -342,7 +340,7 @@ fn fuzz_testing() {
                         };
                     }
                 }
-                2 => {
+                TAG_DEVICE_REPLACE => {
                     let mut inner_counter = 0;
                     loop {
                         // Replacing an existing trusted device
@@ -399,7 +397,7 @@ fn fuzz_testing() {
                         };
                     }
                 }
-                3 => {
+                TAG_DEVICE_SELF_REPLACE => {
                     let mut inner_counter = 0;
                     loop {
                         // Self-replacing an existing trusted device
@@ -454,62 +452,6 @@ fn fuzz_testing() {
             if counter > 0 {
                 break;
             }
-            /*
-            if (randomnumber(OPERATIONS as u64)) == 0 &&
-                trusted.contains_key(sub_pk) && trusted.len() > 1 &&  // TODO: should be `trusted.len() >= 1`!
-                trusted.len() < MAX_DEVICES
-            {
-                loop {
-                    let c2 = randomnumber(DEVICES as u64) as usize;
-                    if c2 != c {
-                        continue; // device cannot replace itself.  TODO: should be allowed!
-                    }
-                    for e in trusted.values() {
-                        if pub_keys[c2][..] == e.key[..] {
-                            continue; // has been added before.
-                        }
-                    }
-                    sub_added_pk = &pub_keys[c2];
-                    break;
-                }
-
-                operation = Operation::DeviceReplace {
-                    removed_subject: *sub_pk,
-                    capabilities: DeviceType::PermanentDevice as u32,
-                    added_subject: *sub_added_pk,
-                    added_subject_signature: EMPTYSIGNATURE,
-                };
-                break; // found it!
-            }
-            if trusted.contains_key(sub_pk) && trusted.len() > 1 {
-                operation = Operation::DeviceRemove { subject: *sub_pk };
-                break; // found it!
-            }
-            if !trusted.contains_key(sub_pk) && trusted.len() < MAX_DEVICES
-            {
-                operation = Operation::DeviceAdd {
-                    subject: *sub_pk,
-                    subject_signature: EMPTYSIGNATURE,
-                    capabilities: DeviceType::PermanentDevice as u32,
-                };
-                break; // found it!
-            }
-            // otherwise we restart the search
-        }
-
-        match rl.create_entry(operation.clone(), iss_pk, iss_sk) {
-            Err(e) => {
-                panic!("Couldn't create new entry: {}", e);
-            }
-            Ok(mut new_entry) => {
-                let subject_signature = new_entry.sign(sub_sk);
-                new_entry
-                    .operation
-                    .set_subject_signature(subject_signature);
-                assert!(rl.can_add_entry(&new_entry));
-                assert!(rl.add_entry(new_entry));
-            }
-            */
         }
     }
 
@@ -535,21 +477,6 @@ fn fuzz_testing() {
                 print!("{}, ", pe.index);
             }
         }
-        // loop {
-        // match rl.get_parent(pe) {
-        // Some(x) => {
-        // pe = x;
-        // if pe.count == 0 {
-        // println!("root.");
-        // break;
-        // } else {
-        // print!("{}, ", pe.count);
-        // }
-        // }
-        // None => break,
-        // }
-        // }
-        //
     }
     assert!(random_journal.check_journal());
 }
