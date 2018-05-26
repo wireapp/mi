@@ -217,7 +217,9 @@ pub enum CapType {
 #[repr(u32)]
 pub enum DeviceType {
     TemporaryDevice = 0u32,
-    PermanentDevice = CapType::AddCap as u32 | CapType::RemoveCap as u32,
+    PermanentDevice = CapType::AddCap as u32
+        | CapType::RemoveCap as u32
+        | CapType::SelfUpdateCap as u32,
 }
 
 /// Information about a trusted device.
