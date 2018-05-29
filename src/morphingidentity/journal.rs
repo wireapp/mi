@@ -526,17 +526,17 @@ impl FullJournal {
             let op_add_device = |&subject,
                                  &subject_signature,
                                  &capabilities,
-                                 trusted_devices: &mut HashMap<
+                                 t_d: &mut HashMap<
                 PublicKey,
                 DeviceInfo,
             >| {
-                if trusted_devices.contains_key(&le.issuer)
-                    && !trusted_devices.contains_key(&subject)
-                    && trusted_devices[&le.issuer].capability_can_add()
+                if t_d.contains_key(&le.issuer)
+                    && !t_d.contains_key(&subject)
+                    && t_d[&le.issuer].capability_can_add()
                     && le.verify_signature(&le.issuer, &le.signature)
                     && le.verify_signature(&subject, &subject_signature)
                 {
-                    trusted_devices.insert(
+                    t_d.insert(
                         subject,
                         DeviceInfo {
                             key: subject,
@@ -546,8 +546,9 @@ impl FullJournal {
                     );
                     true
                 } else {
-                    println!("check_journal: Entry of type 'Add' error");
-                    if !trusted_devices.contains_key(&le.issuer) {
+                    println!("check_journal (index {}): Entry of type 'Add' error", i);
+                    println!("Number of trusted devices: {}", t_d.len());
+                    if !t_d.contains_key(&le.issuer) {
                         println!("check_journal: Issuer not trusted");
                     }
                     if !le.verify_signature(&le.issuer, &le.signature) {
@@ -560,7 +561,7 @@ impl FullJournal {
                             "check_journal: Subject signature is wrong"
                         );
                     }
-                    if trusted_devices.contains_key(&subject) {
+                    if t_d.contains_key(&subject) {
                         println!(
                             "check_journal: Subject is already trusted"
                         );
@@ -635,6 +636,10 @@ impl FullJournal {
                 }
             };
 
+            println!(
+                "Current number of trusted devices: {}",
+                trusted_devices.len()
+            );
             match le.operation {
                 Operation::DeviceAdd {
                     subject,
