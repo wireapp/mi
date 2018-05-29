@@ -1,5 +1,6 @@
-use entries::{JournalEntry, Operation};
+use entries::JournalEntry;
 use journal::*;
+use operation::Operation;
 use sodiumoxide::crypto::hash::sha256::Digest;
 use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashMap;
