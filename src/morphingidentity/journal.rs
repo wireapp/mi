@@ -2,7 +2,8 @@ use cbor::DecodeResult;
 use cbor_utils::{
     ensure_array_length, run_decoder_full, run_encoder, MIDecodeError,
 };
-use entries::{DeviceInfo, DeviceType, JournalEntry, Operation};
+use entries::{DeviceInfo, DeviceType, JournalEntry};
+use operation::Operation;
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
