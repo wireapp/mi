@@ -5,6 +5,7 @@ extern crate uuid;
 
 use morphingidentity::entries::*;
 use morphingidentity::journal::FullJournal;
+use morphingidentity::operation::*;
 use morphingidentity::rand_utils::{randomnumber, GoodRand};
 use morphingidentity::utils::EMPTYSIGNATURE;
 use sodiumoxide::crypto::hash;
