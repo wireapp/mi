@@ -120,13 +120,13 @@ impl JournalEntry {
     /// considered parts of the signed message.
     pub fn verify_signature(
         &self,
-        signee: &PublicKey,
+        signing_identity: &PublicKey,
         signature: &Signature,
     ) -> bool {
         sign::verify_detached(
             signature,
             self.partial_hash().as_ref(),
-            signee,
+            signing_identity,
         )
     }
 

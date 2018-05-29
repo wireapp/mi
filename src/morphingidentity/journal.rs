@@ -1,4 +1,4 @@
-use cbor::DecodeResult;
+use cbor::{DecodeError, DecodeResult};
 use cbor_utils::{
     ensure_array_length, run_decoder_full, run_encoder, MIDecodeError,
 };
@@ -11,7 +11,7 @@ use std::error::Error;
 use std::fmt;
 use utils::{fmt_hex, EMPTYSIGNATURE};
 use uuid::{ParseError, Uuid};
-use validator::Validator;
+use validator::{Validator, ValidatorError};
 
 pub const FORMAT_JOURNAL_VERSION: u32 = 0;
 pub const MAX_DEVICES: usize = 8;
@@ -230,68 +230,80 @@ impl FullJournal {
     // pub fn create_remove_device() {}
 
     /// Check if given entry can be added to the journal.
-    pub fn can_add_entry(&self, entry: &JournalEntry) -> bool {
+    pub fn can_add_entry(
+        &self,
+        entry: &JournalEntry,
+    ) -> Result<(), ValidatorError> {
         Validator::validate_entry(&self, entry)
     }
 
-    pub fn add_entry(&mut self, entry: JournalEntry) -> bool {
-        if self.can_add_entry(&entry) {
-            self.entries.push(entry.clone());
-            match entry.operation {
-                Operation::DeviceAdd {
-                    subject,
-                    capabilities,
-                    ..
-                } => {
-                    self.trusted_devices.insert(
+    pub fn add_entry(
+        &mut self,
+        entry: JournalEntry,
+    ) -> Result<(), ValidatorError> {
+        match self.can_add_entry(&entry) {
+            Ok(()) => {
+                self.entries.push(entry.clone());
+                match entry.operation {
+                    Operation::DeviceAdd {
                         subject,
-                        DeviceInfo {
-                            key: subject,
-                            capabilities,
-                            entry,
-                        },
-                    );
-                }
-                Operation::DeviceRemove { subject, .. } => {
-                    self.trusted_devices.remove(&subject);
-                }
-                Operation::DeviceReplace {
-                    removed_subject,
-                    capabilities,
-                    added_subject,
-                    ..
-                } => {
-                    self.trusted_devices.remove(&removed_subject);
-                    self.trusted_devices.insert(
+                        capabilities,
+                        ..
+                    } => {
+                        self.trusted_devices.insert(
+                            subject,
+                            DeviceInfo {
+                                key: subject,
+                                capabilities,
+                                entry,
+                            },
+                        );
+                    }
+                    Operation::DeviceRemove { subject, .. } => {
+                        self.trusted_devices.remove(&subject);
+                    }
+                    Operation::DeviceReplace {
+                        removed_subject,
+                        capabilities,
                         added_subject,
-                        DeviceInfo {
-                            key: added_subject,
-                            capabilities,
-                            entry,
-                        },
-                    );
-                }
-                Operation::DeviceSelfReplace { added_subject, .. } => {
-                    let current_device = self
-                        .get_trusted_device(&entry.issuer)
-                        .unwrap()
-                        .clone();
-                    self.trusted_devices.remove(&entry.issuer);
-                    self.trusted_devices.insert(
-                        added_subject,
-                        DeviceInfo {
-                            key: added_subject,
-                            capabilities: current_device.capabilities,
-                            entry,
-                        },
-                    );
-                }
-            };
-            self.hash = self.entries.last().unwrap().hash();
-            return true;
+                        ..
+                    } => {
+                        self.trusted_devices.remove(&removed_subject);
+                        self.trusted_devices.insert(
+                            added_subject,
+                            DeviceInfo {
+                                key: added_subject,
+                                capabilities,
+                                entry,
+                            },
+                        );
+                    }
+                    Operation::DeviceSelfReplace {
+                        added_subject, ..
+                    } => {
+                        let current_device = self
+                            .get_trusted_device(&entry.issuer)
+                            .unwrap()
+                            .clone();
+                        self.trusted_devices.remove(&entry.issuer);
+                        self.trusted_devices.insert(
+                            added_subject,
+                            DeviceInfo {
+                                key: added_subject,
+                                capabilities: current_device.capabilities,
+                                entry,
+                            },
+                        );
+                    }
+                };
+                self.hash = self.entries.last().unwrap().hash();
+                Ok(())
+            }
+            Err(e) => {
+                drop(entry);
+                Err(e)
+            }
         }
-        drop(entry);
-        false
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -339,10 +351,14 @@ impl FullJournal {
                     // TODO: either this should check for errors, or we
                     // shouldn't do any error checking in the decoder
                     // (including "empty journal" and "weird root entry")
-                    journal.add_entry(e);
+                    if let Err(e) = journal.add_entry(e) {
+                        let e1: Box<
+                            Error + Send + Sync,
+                        > = From::from(e);
+                        return Err(DecodeError::Other(e1));
+                    };
                 }
             }
-
             Ok(journal)
         })
     }
