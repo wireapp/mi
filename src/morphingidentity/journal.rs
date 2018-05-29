@@ -3,12 +3,11 @@ use cbor_utils::{
     ensure_array_length, run_decoder_full, run_encoder, MIDecodeError,
 };
 use entries::{DeviceInfo, DeviceType, JournalEntry};
-use operation::{Operation, OperationError};
+use operation::Operation;
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt;
 use utils::{fmt_hex, EMPTYSIGNATURE};
 use uuid::{ParseError, Uuid};
 use validator::{Validator, ValidatorError};
@@ -43,64 +42,6 @@ impl JournalID {
 impl From<Uuid> for JournalID {
     fn from(n: Uuid) -> JournalID {
         JournalID(n)
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum CreateEntryError {
-    /// The operation could not be applied to the journal.
-    BadOperation { operation_error: OperationError },
-    /// The journal can only hold `entry_limit` entries.
-    EntryLimitExceeded { entry_limit: u32 },
-    /// It's impossible to add an entry to a journal with no entries. The
-    /// journal was created incorrectly.
-    EmptyJournal,
-    /// The entry issuer is not on the list of trusted devices and thus is
-    /// not allowed to add entries to the journal.
-    UntrustedIssuer,
-}
-
-impl fmt::Display for CreateEntryError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match *self {
-            CreateEntryError::BadOperation {
-                ref operation_error,
-            } => write!(
-                f,
-                "The operation could not be applied to the journal: {}",
-                operation_error
-            ),
-            CreateEntryError::EntryLimitExceeded { entry_limit } => write!(
-                f,
-                "When trying to add an entry, entry number limit \
-                 ({} entries) was exceeded",
-                entry_limit
-            ),
-            CreateEntryError::EmptyJournal => write!(
-                f,
-                "Tried to add an entry to a journal with no entries; \
-                 the journal was created incorrectly"
-            ),
-            CreateEntryError::UntrustedIssuer => write!(
-                f,
-                "Entry issuer is not on the list of trusted devices \
-                 and thus is not allowed to add entries to the journal"
-            ),
-        }
-    }
-}
-
-impl Error for CreateEntryError {
-    fn description(&self) -> &str {
-        "CreateEntryError"
-    }
-}
-
-impl From<OperationError> for CreateEntryError {
-    fn from(error: OperationError) -> Self {
-        CreateEntryError::BadOperation {
-            operation_error: error,
-        }
     }
 }
 
@@ -154,65 +95,13 @@ impl FullJournal {
     }
 
     /// Create and return a `JournalEntry` without adding it to the
-    /// journal.  Needs to be a function of `FullJournal` for the
-    /// digest of the previous entry (and some checks).
+    /// journal.
     pub fn create_entry(
         &self,
         operation: Operation,
         issuer_pk: &PublicKey,
         issuer_sk: &SecretKey,
-    ) -> Result<JournalEntry, CreateEntryError> {
-        // TODO: separate out this check because it's used in more than one
-        // place, I think
-        let devices = self.trusted_devices.len();
-        match operation {
-            Operation::DeviceAdd { subject, .. } => {
-                if devices >= MAX_DEVICES {
-                    return Err(OperationError::DeviceLimitExceeded {
-                        device_limit: MAX_DEVICES as u32,
-                    }.into());
-                };
-                if self.trusted_devices.contains_key(&subject) {
-                    return Err(OperationError::DeviceAlreadyTrusted.into());
-                };
-            }
-            Operation::DeviceRemove { subject, .. } => {
-                if devices <= 1 {
-                    return Err(OperationError::LastDevice.into());
-                };
-                if !self.trusted_devices.contains_key(&subject) {
-                    return Err(OperationError::SubjectNotFound.into());
-                };
-            }
-            Operation::DeviceReplace {
-                removed_subject,
-                added_subject,
-                ..
-            } => {
-                if !self.trusted_devices.contains_key(&removed_subject) {
-                    return Err(OperationError::SubjectNotFound.into());
-                };
-                if self.trusted_devices.contains_key(&added_subject) {
-                    return Err(OperationError::DeviceAlreadyTrusted.into());
-                };
-            }
-            Operation::DeviceSelfReplace { added_subject, .. } => {
-                if self.trusted_devices.contains_key(&added_subject) {
-                    return Err(OperationError::DeviceAlreadyTrusted.into());
-                };
-            }
-        }
-        if self.entries.len() >= u32::max_value() as usize {
-            return Err(CreateEntryError::EntryLimitExceeded {
-                entry_limit: u32::max_value(),
-            });
-        };
-        if self.entries.is_empty() {
-            return Err(CreateEntryError::EmptyJournal);
-        };
-        if !self.trusted_devices.contains_key(issuer_pk) {
-            return Err(CreateEntryError::UntrustedIssuer);
-        };
+    ) -> Result<JournalEntry, ValidatorError> {
         let last_entry = self.entries.last().unwrap();
         let mut entry = JournalEntry::new(
             self.journal_id,
@@ -222,12 +111,11 @@ impl FullJournal {
             *issuer_pk,
         );
         entry.signature = entry.sign(issuer_sk);
-        Ok(entry)
+        match Validator::validate_unsigned_subject_entry(&self, &entry) {
+            Ok(()) => Ok(entry),
+            Err(e) => Err(e),
+        }
     }
-
-    // pub fn create_add_permanent_device() {}
-    // pub fn create_add_temporary_device() {}
-    // pub fn create_remove_device() {}
 
     /// Check if given entry can be added to the journal.
     pub fn can_add_entry(

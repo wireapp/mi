@@ -1,7 +1,5 @@
 use cbor::{DecodeResult, Decoder, EncodeResult, Encoder};
 use sodiumoxide::crypto::sign::*;
-use std::error::Error;
-use std::fmt;
 use std::io::{Read, Write};
 
 /// Specific operation done by an entry.
@@ -193,55 +191,5 @@ impl Operation {
                 max_known_tag: OPERATIONS - 1,
             }.into()),
         }
-    }
-}
-
-// Errors //////////////////////////////////////////////////////////////////
-
-#[derive(Debug, PartialEq)]
-pub enum OperationError {
-    /// *Addition:* there can be at most `device_limit` trusted devices at
-    /// any time, and this limit has been exceeded.
-    DeviceLimitExceeded { device_limit: u32 },
-    /// *Addition or replacement:* a device that is being added to journal
-    /// is already trusted by the journal and can't be added again.
-    DeviceAlreadyTrusted,
-    /// *Removal:* you're trying to remove the last trusted device from the
-    /// journal.
-    LastDevice,
-    /// *Removal or replacement:* you're trying to remove a device that is
-    /// not in the journal.
-    SubjectNotFound,
-}
-
-impl fmt::Display for OperationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match *self {
-            OperationError::DeviceLimitExceeded { device_limit } => write!(
-                f,
-                "When trying to add a device, trusted device limit \
-                 ({} devices) was exceeded",
-                device_limit
-            ),
-            OperationError::DeviceAlreadyTrusted => write!(
-                f,
-                "The device that is being added (either by a 'DeviceAdd' \
-                 or 'DeviceReplace' entry) is trusted already"
-            ),
-            OperationError::LastDevice => {
-                write!(f, "Removing the last trusted device is not allowed")
-            }
-            OperationError::SubjectNotFound => write!(
-                f,
-                "Trying to remove or replace a device that is not in \
-                 the journal"
-            ),
-        }
-    }
-}
-
-impl Error for OperationError {
-    fn description(&self) -> &str {
-        "OperationError"
     }
 }

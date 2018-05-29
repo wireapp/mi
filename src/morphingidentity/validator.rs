@@ -68,6 +68,18 @@ impl Validator {
             _ => None,
         }
     }
+    pub fn validate_unsigned_subject_entry(
+        journal: &FullJournal,
+        entry: &JournalEntry,
+    ) -> Result<(), ValidatorError> {
+        match Self::validate_entry(journal, entry) {
+            Ok(()) => Ok(()),
+            Err(e) => match e {
+                ValidatorError::SubjectSignatureInvalid => Ok(()),
+                _ => Err(e),
+            },
+        }
+    }
     pub fn validate_journal() {}
     fn validate_device_add(
         journal: &FullJournal,
