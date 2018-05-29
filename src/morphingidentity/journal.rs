@@ -3,7 +3,7 @@ use cbor_utils::{
     ensure_array_length, run_decoder_full, run_encoder, MIDecodeError,
 };
 use entries::{DeviceInfo, DeviceType, JournalEntry};
-use operation::Operation;
+use operation::{Operation, OperationError};
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
@@ -35,52 +35,27 @@ impl From<Uuid> for JournalID {
 
 #[derive(Debug, PartialEq)]
 pub enum CreateEntryError {
-    /// *Addition:* there can be at most `device_limit` trusted devices at
-    /// any time, and this limit has been exceeded.
-    DeviceLimitExceeded { device_limit: u32 },
-    /// *Addition or replacement:* a device that is being added to journal
-    /// is already trusted by the journal and can't be added again.
-    DeviceAlreadyTrusted,
-    /// *Removal:* you're trying to remove the last trusted device from the
-    /// journal.
-    LastDevice,
-    /// *Removal or replacement:* you're trying to remove a device that is
-    /// not in the journal.
-    SubjectNotFound,
-    /// *Any entry:* the journal can only hold `entry_limit` entries.
+    /// The operation could not be applied to the journal.
+    BadOperation { operation_error: OperationError },
+    /// The journal can only hold `entry_limit` entries.
     EntryLimitExceeded { entry_limit: u32 },
-    /// *Any entry:* it's impossible to add an entry to a journal with no
-    /// entries. The journal was created incorrectly.
+    /// It's impossible to add an entry to a journal with no entries. The
+    /// journal was created incorrectly.
     EmptyJournal,
-    /// *Any entry:* the entry issuer is not on the list of trusted devices
-    /// and thus is not allowed to add entries to the journal.
+    /// The entry issuer is not on the list of trusted devices and thus is
+    /// not allowed to add entries to the journal.
     UntrustedIssuer,
 }
 
 impl fmt::Display for CreateEntryError {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match *self {
-            CreateEntryError::DeviceLimitExceeded { device_limit } => {
-                write!(
-                    f,
-                    "When trying to add a device, trusted device limit \
-                     ({} devices) was exceeded",
-                    device_limit
-                )
-            }
-            CreateEntryError::DeviceAlreadyTrusted => write!(
+            CreateEntryError::BadOperation {
+                ref operation_error,
+            } => write!(
                 f,
-                "The device that is being added (either by \
-                 a 'DeviceAdd' or 'DeviceReplace' entry) \
-                 is trusted already"
-            ),
-            CreateEntryError::LastDevice => {
-                write!(f, "Removing the last trusted device is not allowed")
-            }
-            CreateEntryError::SubjectNotFound => write!(
-                f,
-                "Trying to remove or replace a device \
-                 that is not in the journal"
+                "The operation could not be applied to the journal: {}",
+                operation_error
             ),
             CreateEntryError::EntryLimitExceeded { entry_limit } => write!(
                 f,
@@ -105,6 +80,14 @@ impl fmt::Display for CreateEntryError {
 impl Error for CreateEntryError {
     fn description(&self) -> &str {
         "CreateEntryError"
+    }
+}
+
+impl From<OperationError> for CreateEntryError {
+    fn from(error: OperationError) -> Self {
+        CreateEntryError::BadOperation {
+            operation_error: error,
+        }
     }
 }
 
@@ -172,20 +155,20 @@ impl FullJournal {
         match operation {
             Operation::DeviceAdd { subject, .. } => {
                 if devices >= MAX_DEVICES {
-                    return Err(CreateEntryError::DeviceLimitExceeded {
+                    return Err(OperationError::DeviceLimitExceeded {
                         device_limit: MAX_DEVICES as u32,
-                    });
+                    }.into());
                 };
                 if self.trusted_devices.contains_key(&subject) {
-                    return Err(CreateEntryError::DeviceAlreadyTrusted);
+                    return Err(OperationError::DeviceAlreadyTrusted.into());
                 };
             }
             Operation::DeviceRemove { subject, .. } => {
                 if devices <= 1 {
-                    return Err(CreateEntryError::LastDevice);
+                    return Err(OperationError::LastDevice.into());
                 };
                 if !self.trusted_devices.contains_key(&subject) {
-                    return Err(CreateEntryError::SubjectNotFound);
+                    return Err(OperationError::SubjectNotFound.into());
                 };
             }
             Operation::DeviceReplace {
@@ -194,15 +177,15 @@ impl FullJournal {
                 ..
             } => {
                 if !self.trusted_devices.contains_key(&removed_subject) {
-                    return Err(CreateEntryError::SubjectNotFound);
+                    return Err(OperationError::SubjectNotFound.into());
                 };
                 if self.trusted_devices.contains_key(&added_subject) {
-                    return Err(CreateEntryError::DeviceAlreadyTrusted);
+                    return Err(OperationError::DeviceAlreadyTrusted.into());
                 };
             }
             Operation::DeviceSelfReplace { added_subject, .. } => {
                 if self.trusted_devices.contains_key(&added_subject) {
-                    return Err(CreateEntryError::DeviceAlreadyTrusted);
+                    return Err(OperationError::DeviceAlreadyTrusted.into());
                 };
             }
         }
