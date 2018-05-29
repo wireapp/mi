@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use utils::{fmt_hex, EMPTYSIGNATURE};
-use uuid::Uuid;
+use uuid::{ParseError, Uuid};
+use validator::Validator;
 
 pub const FORMAT_JOURNAL_VERSION: u32 = 0;
 pub const MAX_DEVICES: usize = 8;
@@ -24,8 +25,20 @@ impl From<u32> for UserID {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
 pub struct JournalID(pub Uuid);
+
+impl JournalID {
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        self.0.as_bytes()
+    }
+    pub fn from_bytes(b: &[u8]) -> Result<JournalID, ParseError> {
+        match Uuid::from_bytes(b) {
+            Ok(u) => Ok(JournalID(u)),
+            Err(e) => Err(e),
+        }
+    }
+}
 
 impl From<Uuid> for JournalID {
     fn from(n: Uuid) -> JournalID {
@@ -93,7 +106,7 @@ impl From<OperationError> for CreateEntryError {
 
 #[derive(PartialEq, Clone)]
 pub struct FullJournal {
-    journal_id: Uuid,
+    journal_id: JournalID,
     hash: Digest,
     entries: Vec<JournalEntry>,
     trusted_devices: HashMap<PublicKey, DeviceInfo>,
@@ -101,7 +114,7 @@ pub struct FullJournal {
 
 impl FullJournal {
     pub fn new(
-        _journal_id: Uuid,
+        _journal_id: JournalID,
         issuer_pk: &PublicKey,
         issuer_sk: &SecretKey,
     ) -> Option<FullJournal> {
@@ -218,106 +231,7 @@ impl FullJournal {
 
     /// Check if given entry can be added to the journal.
     pub fn can_add_entry(&self, entry: &JournalEntry) -> bool {
-        let last_entry = self.entries.last().unwrap();
-        if last_entry.index == u32::max_value()
-            || entry.journal_id != self.journal_id
-            || last_entry.hash()[..] != entry.history_hash[..]
-            || entry.index != (last_entry.index + 1)
-        {
-            return false;
-        }
-        let devices = self.trusted_devices.len();
-        match entry.operation {
-            // TODO: some of the checks here are duplicates from
-            // `create_entry`.  there may be a reason for that, but
-            // probably not.
-            Operation::DeviceAdd { .. } if devices >= MAX_DEVICES => false,
-            Operation::DeviceRemove { .. } if devices <= 1 => false,
-            Operation::DeviceAdd {
-                subject,
-                subject_signature,
-                ..
-            } => {
-                let issuer_can_add =
-                    match self.get_trusted_device(&entry.issuer) {
-                        Some(device) => device.capability_can_add(),
-                        None => false,
-                    };
-                issuer_can_add
-                    && !self.trusted_devices.contains_key(&subject)
-                    && entry
-                        .verify_signature(&entry.issuer, &entry.signature)
-                    && entry.verify_signature(&subject, &subject_signature)
-            }
-            Operation::DeviceRemove { subject, .. } => {
-                let issuer_can_remove =
-                    match self.get_trusted_device(&entry.issuer) {
-                        Some(device) => device.capability_can_remove(),
-                        None => false,
-                    };
-                let subject_is_removable = match self
-                    .get_trusted_device(&subject)
-                {
-                    Some(device) => !device.capability_cannot_be_removed(),
-                    None => false,
-                };
-                issuer_can_remove && subject_is_removable
-                    && entry
-                        .verify_signature(&entry.issuer, &entry.signature)
-            }
-            Operation::DeviceReplace {
-                removed_subject,
-                added_subject,
-                added_subject_signature,
-                ..
-            } => {
-                let issuer_can_replace =
-                    match self.get_trusted_device(&entry.issuer) {
-                        Some(device) => {
-                            device.capability_can_remove()
-                                && device.capability_can_add()
-                        }
-                        None => false,
-                    };
-                let removed_subject_is_removable = match self
-                    .get_trusted_device(&removed_subject)
-                {
-                    Some(device) => !device.capability_cannot_be_removed(),
-                    None => false,
-                };
-                let added_subject_is_new =
-                    !self.trusted_devices.contains_key(&added_subject);
-                issuer_can_replace
-                    && removed_subject_is_removable
-                    && added_subject_is_new
-                    && entry
-                        .verify_signature(&entry.issuer, &entry.signature)
-                    && entry.verify_signature(
-                        &added_subject,
-                        &added_subject_signature,
-                    )
-            }
-            Operation::DeviceSelfReplace {
-                added_subject,
-                added_subject_signature,
-                ..
-            } => {
-                let issuer_can_self_update =
-                    match self.get_trusted_device(&entry.issuer) {
-                        Some(device) => device.capability_can_self_update(),
-                        None => false,
-                    };
-                let added_subject_is_new =
-                    !self.trusted_devices.contains_key(&added_subject);
-                issuer_can_self_update && added_subject_is_new
-                    && entry
-                        .verify_signature(&entry.issuer, &entry.signature)
-                    && entry.verify_signature(
-                        &added_subject,
-                        &added_subject_signature,
-                    )
-            }
-        }
+        Validator::validate_entry(&self, entry)
     }
 
     pub fn add_entry(&mut self, entry: JournalEntry) -> bool {
@@ -437,23 +351,7 @@ impl FullJournal {
     /// self-signed addition entry). In case it is, return `DeviceInfo`
     /// corresponding to the root device.
     fn check_first_entry(entry: &JournalEntry) -> Option<DeviceInfo> {
-        match entry.operation {
-            Operation::DeviceAdd {
-                subject,
-                capabilities,
-                ..
-            } if subject == entry.issuer
-                && entry
-                    .verify_signature(&entry.issuer, &entry.signature) =>
-            {
-                Some(DeviceInfo {
-                    key: subject,
-                    capabilities,
-                    entry: entry.clone(),
-                })
-            }
-            _ => None,
-        }
+        Validator::validate_first_entry(entry)
     }
 
     /// Verify all invariants of the entire journal.
@@ -725,7 +623,7 @@ impl FullJournal {
     }
 
     pub fn get_journal_id(&self) -> JournalID {
-        JournalID(self.journal_id)
+        self.journal_id
     }
 
     pub fn get_journal_hash(&self) -> Digest {
@@ -764,6 +662,10 @@ impl FullJournal {
 
     pub fn get_entry(&self, index: usize) -> &JournalEntry {
         &self.entries[index]
+    }
+
+    pub fn get_entries(&self) -> &Vec<JournalEntry> {
+        &self.entries
     }
 
     pub fn get_permanent_hash(&self) -> Digest {

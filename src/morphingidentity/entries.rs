@@ -5,15 +5,13 @@ use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature};
 use std::io::{Read, Write};
-use uuid::Uuid;
 
-use operation::*;
 use cbor_utils::{run_decoder_full, run_encoder};
-use journal::FullJournal;
+use journal::{FullJournal, JournalID};
+use operation::*;
 use utils::EMPTYSIGNATURE;
 
 pub const FORMAT_ENTRY_VERSION: u32 = 0;
-
 
 #[repr(u32)]
 #[cfg_attr(rustfmt, rustfmt_skip)]
@@ -64,7 +62,7 @@ impl DeviceInfo {
 #[derive(PartialEq, Clone, Debug)]
 pub struct JournalEntry {
     /// Journal that the entry belongs to.
-    pub journal_id: Uuid,
+    pub journal_id: JournalID,
 
     /// Hash over previous versions.
     pub history_hash: Digest,
@@ -89,7 +87,7 @@ pub struct JournalEntry {
 
 impl JournalEntry {
     pub fn new(
-        journal_id: Uuid,
+        journal_id: JournalID,
         history_hash: Digest,
         index: u32,
         operation: Operation,
@@ -196,7 +194,7 @@ impl JournalEntry {
                     key,
                     "JournalEntry::journal_id",
                     journal_id,
-                    decode_uuid(d)?
+                    decode_journal_id(d)?
                 ),
                 1 => uniq!(
                     key,
@@ -283,14 +281,16 @@ pub struct EntryExtension {
 impl EntryExtension {
     pub fn hash(&mut self) -> Digest {
         self.permanent_subject_publickeys.sort();
-        hash(&run_encoder(&|e| {
-            e.u32(self.format_version)?;
-            e.u32(self.permanent_count)?;
-            for i in 0..self.permanent_subject_publickeys.len() {
-                e.bytes(&self.permanent_subject_publickeys[i][..])?;
-            }
-            Ok(())
-        }).unwrap())
+        hash(
+            &run_encoder(&|e| {
+                e.u32(self.format_version)?;
+                e.u32(self.permanent_count)?;
+                for i in 0..self.permanent_subject_publickeys.len() {
+                    e.bytes(&self.permanent_subject_publickeys[i][..])?;
+                }
+                Ok(())
+            }).unwrap(),
+        )
     }
 
     pub fn create_extension(

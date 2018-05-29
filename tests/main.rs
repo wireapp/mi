@@ -4,7 +4,7 @@ extern crate sodiumoxide;
 extern crate uuid;
 
 use morphingidentity::entries::*;
-use morphingidentity::journal::FullJournal;
+use morphingidentity::journal::*;
 use morphingidentity::operation::*;
 use morphingidentity::rand_utils::{randomnumber, GoodRand};
 use morphingidentity::utils::EMPTYSIGNATURE;
@@ -24,7 +24,7 @@ fn entry_test() {
         capabilities: DeviceType::PermanentDevice as u32,
     };
     let mut je = JournalEntry::new(
-        Uuid::nil(),
+        JournalID(Uuid::nil()),
         hash::sha256::hash(&[]),
         0,
         operation,

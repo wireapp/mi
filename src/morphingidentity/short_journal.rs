@@ -4,11 +4,10 @@ use operation::Operation;
 use sodiumoxide::crypto::hash::sha256::Digest;
 use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashMap;
-use uuid::Uuid;
 
 pub struct ShortJournal {
     version: u32,
-    journal_id: Uuid,
+    journal_id: JournalID,
     hash: Digest,
     entry: JournalEntry,
     trusted_devices: HashMap<PublicKey, JournalEntry>,
@@ -117,7 +116,7 @@ impl ShortJournal {
     pub fn get_journal_version(&self) -> u32 {
         self.version
     }
-    pub fn get_journal_id(&self) -> Uuid {
+    pub fn get_journal_id(&self) -> JournalID {
         self.journal_id
     }
     pub fn get_journal_hash(&self) -> Digest {
