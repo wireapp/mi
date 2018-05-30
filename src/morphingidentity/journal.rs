@@ -7,8 +7,7 @@ use operation::Operation;
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
-use std::error::Error;
-use utils::{fmt_hex, EMPTYSIGNATURE};
+use utils::EMPTYSIGNATURE;
 use uuid::{ParseError, Uuid};
 use validator::{Validator, ValidatorError};
 
@@ -94,6 +93,36 @@ impl FullJournal {
         })
     }
 
+    pub fn new_from_entry(
+        entry: &JournalEntry,
+    ) -> Result<FullJournal, ValidatorError> {
+        match Validator::validate_first_entry(entry) {
+            Ok(device_info) => {
+                let new_entries = vec![entry.clone()];
+                let mut trusted_devices: HashMap<
+                    PublicKey,
+                    DeviceInfo,
+                > = HashMap::new();
+                trusted_devices.insert(
+                    entry.issuer,
+                    DeviceInfo {
+                        key: entry.issuer,
+                        capabilities: device_info.capabilities,
+                        entry: entry.clone(),
+                    },
+                );
+                let mut new_journal: FullJournal = FullJournal {
+                    journal_id: entry.journal_id,
+                    entries: new_entries,
+                    trusted_devices,
+                    hash: hash(&[]),
+                };
+                Ok(new_journal)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Create and return a `JournalEntry` without adding it to the
     /// journal.
     pub fn create_entry(
@@ -131,7 +160,7 @@ impl FullJournal {
     ) -> Result<(), ValidatorError> {
         match self.can_add_entry(&entry) {
             Ok(()) => {
-                self.entries.push(entry.clone());
+                self.entries.push(entry.clone()); //TODO: make sure the entry is properly consumed
                 match entry.operation {
                     Operation::DeviceAdd {
                         subject,
@@ -236,14 +265,8 @@ impl FullJournal {
             if num > 1 {
                 for _ in 1..num {
                     let e = JournalEntry::decode(&mut d)?;
-                    // TODO: either this should check for errors, or we
-                    // shouldn't do any error checking in the decoder
-                    // (including "empty journal" and "weird root entry")
                     if let Err(e) = journal.add_entry(e) {
-                        let e1: Box<
-                            Error + Send + Sync,
-                        > = From::from(e);
-                        return Err(DecodeError::Other(e1));
+                        return Err(DecodeError::Other(From::from(e)));
                     };
                 }
             }
@@ -254,252 +277,15 @@ impl FullJournal {
     /// Check that the root entry of the journal is what we expect (a
     /// self-signed addition entry). In case it is, return `DeviceInfo`
     /// corresponding to the root device.
-    fn check_first_entry(entry: &JournalEntry) -> Option<DeviceInfo> {
+    fn check_first_entry(
+        entry: &JournalEntry,
+    ) -> Result<DeviceInfo, ValidatorError> {
         Validator::validate_first_entry(entry)
     }
 
     /// Verify all invariants of the entire journal.
-    pub fn check_journal(&mut self) -> bool {
-        println!("check_journal: started");
-        let mut trusted_devices: HashMap<PublicKey, DeviceInfo> =
-            HashMap::new();
-        if self.entries.is_empty() {
-            return false;
-        }
-        let first_entry: &JournalEntry = self.entries.first().unwrap();
-        match FullJournal::check_first_entry(first_entry) {
-            None => return false,
-            Some(device_info) => {
-                trusted_devices.insert(first_entry.issuer, device_info);
-                if self.entries.len() == 1 {
-                    self.trusted_devices = trusted_devices;
-                    return true;
-                }
-            }
-        }
-        println!("check_journal: Found {} entries", self.entries.len());
-        for i in 1..(self.entries.len()) {
-            let le = &self.entries[i];
-            if le.journal_id != self.journal_id
-                || self.entries[i - 1].hash()[..] != le.history_hash[..]
-                || le.index != i as u32
-            {
-                if le.index != i as u32 {
-                    println!("check_journal: count mismatch, should be {}, found {}",
-                             i,
-                             le.index);
-                } else if le.journal_id != self.journal_id {
-                    println!("check_journal: ID mismatch");
-                } else if self.entries[i - 1].hash()[..]
-                    != le.history_hash[..]
-                {
-                    println!("check_journal: hash mismatch, advanced hash from entry {} is \
-                              different",
-                             &self.entries[i - 1].index);
-                    println!(
-                        "check_journal: actual hash: {}",
-                        fmt_hex(&self.entries[i - 1].hash()[..])
-                    );
-                    println!(
-                        "check_journal: advanced hash: {}",
-                        fmt_hex(&le.history_hash[..])
-                    );
-                }
-                return false;
-            }
-
-            // TODO: this check probably duplicates code from FullJournal::can_add_entry.  deduplicate!
-            let op_add_device = |&subject,
-                                 &subject_signature,
-                                 &capabilities,
-                                 t_d: &mut HashMap<
-                PublicKey,
-                DeviceInfo,
-            >| {
-                if t_d.contains_key(&le.issuer)
-                    && !t_d.contains_key(&subject)
-                    && t_d[&le.issuer].capability_can_add()
-                    && le.verify_signature(&le.issuer, &le.signature)
-                    && le.verify_signature(&subject, &subject_signature)
-                {
-                    t_d.insert(
-                        subject,
-                        DeviceInfo {
-                            key: subject,
-                            capabilities,
-                            entry: le.clone(),
-                        },
-                    );
-                    true
-                } else {
-                    println!("check_journal (index {}): Entry of type 'Add' error", i);
-                    println!("Number of trusted devices: {}", t_d.len());
-                    if !t_d.contains_key(&le.issuer) {
-                        println!("check_journal: Issuer not trusted");
-                    }
-                    if !le.verify_signature(&le.issuer, &le.signature) {
-                        println!(
-                            "check_journal: Issuer signature is wrong"
-                        );
-                    }
-                    if !le.verify_signature(&subject, &subject_signature) {
-                        println!(
-                            "check_journal: Subject signature is wrong"
-                        );
-                    }
-                    if t_d.contains_key(&subject) {
-                        println!(
-                            "check_journal: Subject is already trusted"
-                        );
-                    }
-                    false
-                }
-            };
-
-            let op_remove_device = |&subject,
-                                    trusted_devices: &mut HashMap<
-                PublicKey,
-                DeviceInfo,
-            >| {
-                if trusted_devices.contains_key(&le.issuer)
-                    && trusted_devices.contains_key(&subject)
-                    && trusted_devices[&le.issuer].capability_can_remove()
-                    && !trusted_devices[&subject]
-                        .capability_cannot_be_removed()
-                    && le.verify_signature(&le.issuer, &le.signature)
-                {
-                    trusted_devices.remove(&subject);
-                    true
-                } else {
-                    println!("check_journal: Entry of type 'Remove' error");
-                    false
-                }
-            };
-
-            let op_self_update_device = |&subject,
-                                         &subject_signature,
-                                         &capabilities,
-                                         trusted_devices: &mut HashMap<
-                PublicKey,
-                DeviceInfo,
-            >| {
-                if trusted_devices.contains_key(&le.issuer)
-                    && !trusted_devices.contains_key(&subject)
-                    && le.verify_signature(&le.issuer, &le.signature)
-                    && le.verify_signature(&subject, &subject_signature)
-                {
-                    trusted_devices.insert(
-                        subject,
-                        DeviceInfo {
-                            key: subject,
-                            capabilities,
-                            entry: le.clone(),
-                        },
-                    );
-                    trusted_devices.remove(&le.issuer);
-                    true
-                } else {
-                    println!("check_journal: Entry of type 'Add' error");
-                    if !trusted_devices.contains_key(&le.issuer) {
-                        println!("check_journal: Issuer not trusted");
-                    }
-                    if !le.verify_signature(&le.issuer, &le.signature) {
-                        println!(
-                            "check_journal: Issuer signature is wrong"
-                        );
-                    }
-                    if !le.verify_signature(&subject, &subject_signature) {
-                        println!(
-                            "check_journal: Subject signature is wrong"
-                        );
-                    }
-                    if trusted_devices.contains_key(&subject) {
-                        println!(
-                            "check_journal: Subject is already trusted"
-                        );
-                    }
-                    false
-                }
-            };
-
-            println!(
-                "Current number of trusted devices: {}",
-                trusted_devices.len()
-            );
-            match le.operation {
-                Operation::DeviceAdd {
-                    subject,
-                    subject_signature,
-                    capabilities,
-                    ..
-                } => if !op_add_device(
-                    &subject,
-                    &subject_signature,
-                    &capabilities,
-                    &mut trusted_devices,
-                ) {
-                    return false;
-                },
-                Operation::DeviceRemove { subject, .. } => {
-                    if !op_remove_device(&subject, &mut trusted_devices) {
-                        return false;
-                    }
-                }
-
-                Operation::DeviceReplace {
-                    removed_subject,
-                    capabilities,
-                    added_subject,
-                    added_subject_signature,
-                    ..
-                } => {
-                    if !op_remove_device(
-                        &removed_subject,
-                        &mut trusted_devices,
-                    ) {
-                        return false;
-                    };
-                    if !op_add_device(
-                        &added_subject,
-                        &added_subject_signature,
-                        &capabilities,
-                        &mut trusted_devices,
-                    ) {
-                        return false;
-                    };
-                }
-                Operation::DeviceSelfReplace {
-                    added_subject,
-                    added_subject_signature,
-                    ..
-                } => {
-                    let capabilities = self
-                        .get_trusted_device(&le.issuer)
-                        .unwrap()
-                        .capabilities;
-                    if !op_self_update_device(
-                        &added_subject,
-                        &added_subject_signature,
-                        &capabilities,
-                        &mut trusted_devices,
-                    ) {
-                        return false;
-                    };
-                }
-            }
-        }
-        println!(
-            "check_journal: Found {} trusted devices:",
-            trusted_devices.len()
-        );
-        for (pk, l) in &trusted_devices {
-            println!("check_journal: Subject PublicKey: {}, Issuer PublicKey {}, count {}",
-                     fmt_hex(&pk[..]),
-                     fmt_hex(&l.entry.issuer[..]),
-                     l.entry.index);
-        }
-        self.trusted_devices = trusted_devices;
-        true
+    pub fn check_journal(&mut self) -> Result<(), ValidatorError> {
+        Validator::validate_journal(&self)
     }
 
     /// Get journal entry corresponding to the addition of a device (if the

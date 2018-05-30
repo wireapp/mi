@@ -32,6 +32,10 @@ impl Validator {
         if last_entry.hash()[..] != entry.history_hash[..] {
             return Err(ValidatorError::HashMismatch);
         }
+        // Issuer signature needs to be valid
+        if !entry.verify_signature(&entry.issuer, &entry.signature) {
+            return Err(ValidatorError::IssuerSignatureInvalid);
+        }
         match entry.operation {
             Operation::DeviceAdd { .. } => {
                 Self::validate_device_add(journal, entry)
@@ -47,27 +51,6 @@ impl Validator {
             }
         }
     }
-    pub fn validate_first_entry(
-        entry: &JournalEntry,
-    ) -> Option<DeviceInfo> {
-        match entry.operation {
-            Operation::DeviceAdd {
-                subject,
-                capabilities,
-                ..
-            } if subject == entry.issuer
-                && entry
-                    .verify_signature(&entry.issuer, &entry.signature) =>
-            {
-                Some(DeviceInfo {
-                    key: subject,
-                    capabilities,
-                    entry: entry.clone(),
-                })
-            }
-            _ => None,
-        }
-    }
     pub fn validate_unsigned_subject_entry(
         journal: &FullJournal,
         entry: &JournalEntry,
@@ -80,7 +63,6 @@ impl Validator {
             },
         }
     }
-    pub fn validate_journal() {}
     fn validate_device_add(
         journal: &FullJournal,
         entry: &JournalEntry,
@@ -98,7 +80,6 @@ impl Validator {
                         device_limit: MAX_DEVICES,
                     });
                 }
-
                 match journal.get_trusted_device(&entry.issuer) {
                     Some(device) => {
                         // Issuer device needs to have the capability to add other devices
@@ -114,11 +95,6 @@ impl Validator {
                 // Subject device needs to be new to the journal
                 if trusted_devices.contains_key(&subject) {
                     return Err(ValidatorError::SubjectAlreadyExists);
-                }
-                // Issuer signature needs to be valid
-                if !entry.verify_signature(&entry.issuer, &entry.signature)
-                {
-                    return Err(ValidatorError::IssuerSignatureInvalid);
                 }
                 // Subject sugnature needs to be valid
                 if !entry.verify_signature(&subject, &subject_signature) {
@@ -143,7 +119,7 @@ impl Validator {
                 match journal.get_trusted_device(&entry.issuer) {
                     Some(device) => {
                         // Issuer device needs to have the capability to remove other devices
-                        if device.capability_can_remove() {
+                        if !device.capability_can_remove() {
                             return Err(ValidatorError::IssuerCannotRemove);
                         }
                     }
@@ -154,7 +130,7 @@ impl Validator {
                 };
                 match journal.get_trusted_device(&subject) {
                     Some(device) => {
-                        if !device.capability_cannot_be_removed() {
+                        if device.capability_cannot_be_removed() {
                             // Subject needs to be removable
                             return Err(ValidatorError::SubjectNotRemovable);
                         }
@@ -164,11 +140,6 @@ impl Validator {
                         return Err(ValidatorError::SubjectNotFound);
                     }
                 };
-                // Issuer signature needs to be valid
-                if !entry.verify_signature(&entry.issuer, &entry.signature)
-                {
-                    return Err(ValidatorError::IssuerSignatureInvalid);
-                }
                 Ok(())
             }
             _ => unreachable!(),
@@ -186,13 +157,13 @@ impl Validator {
                 ..
             } => {
                 let trusted_devices = journal.get_trusted_devices();
-                // Issuer device needs to have the capability to add other devices
-                // Issuer device needs to have the capability to remove other devices
                 match journal.get_trusted_device(&entry.issuer) {
                     Some(device) => {
+                        // Issuer device needs to have the capability to remove other devices
                         if !device.capability_can_remove() {
                             return Err(ValidatorError::IssuerCannotRemove);
                         }
+                        // Issuer device needs to have the capability to add other devices
                         if !device.capability_can_add() {
                             return Err(ValidatorError::IssuerCannotAdd);
                         }
@@ -217,11 +188,6 @@ impl Validator {
                 // Added subject device needs to be new to the journal
                 if trusted_devices.contains_key(&added_subject) {
                     return Err(ValidatorError::SubjectAlreadyExists);
-                }
-                // Issuer signature needs to be valid
-                if !entry.verify_signature(&entry.issuer, &entry.signature)
-                {
-                    return Err(ValidatorError::IssuerSignatureInvalid);
                 }
                 // Added subject signature needs to be valid
                 if !entry.verify_signature(
@@ -264,11 +230,6 @@ impl Validator {
                 if trusted_devices.contains_key(&added_subject) {
                     return Err(ValidatorError::SubjectAlreadyExists);
                 }
-                // Issuer signature needs to be valid
-                if !entry.verify_signature(&entry.issuer, &entry.signature)
-                {
-                    return Err(ValidatorError::IssuerSignatureInvalid);
-                }
                 // Added subject signature needs to be valid
                 if !entry.verify_signature(
                     &added_subject,
@@ -280,6 +241,59 @@ impl Validator {
             }
             _ => unreachable!(),
         }
+    }
+    pub fn validate_first_entry(
+        entry: &JournalEntry,
+    ) -> Result<DeviceInfo, ValidatorError> {
+        match entry.operation {
+            Operation::DeviceAdd {
+                subject,
+                capabilities,
+                ..
+            } => {
+                if subject != entry.issuer {
+                    return Err(ValidatorError::InvalidOperation);
+                }
+                if !entry.verify_signature(&entry.issuer, &entry.signature)
+                {
+                    return Err(ValidatorError::IssuerSignatureInvalid);
+                }
+                Ok(DeviceInfo {
+                    key: subject,
+                    capabilities,
+                    entry: entry.clone(),
+                })
+            }
+            _ => Err(ValidatorError::InvalidOperation),
+        }
+    }
+    pub fn validate_journal(
+        journal: &FullJournal,
+    ) -> Result<(), ValidatorError> {
+        let entries = journal.get_entries();
+        if entries.is_empty() {
+            return Err(ValidatorError::EmptyJournal);
+        }
+        // Check the first entry
+        let first_entry: &JournalEntry = entries.first().unwrap();
+        let mut new_journal: FullJournal =
+            match FullJournal::new_from_entry(first_entry) {
+                Ok(j) => j,
+                Err(e) => {
+                    return Err(e);
+                }
+            };
+        // Check all other entries
+        for je in entries.iter().skip(1) {
+            match new_journal.add_entry(je.clone()) {
+                Err(e) => {
+                    println!("{}", e);
+                    return Err(e);
+                }
+                Ok(()) => {}
+            };
+        }
+        Ok(())
     }
 }
 
@@ -318,6 +332,8 @@ pub enum ValidatorError {
     SubjectSignatureInvalid,
     /// *Self-update:* The issuer is not allowed to self-update.
     IssuerCannotSelfUpdate,
+    /// *All operations:* Invalid operation.
+    InvalidOperation,
 }
 
 impl fmt::Display for ValidatorError {
@@ -341,6 +357,7 @@ impl fmt::Display for ValidatorError {
             ValidatorError::IssuerSignatureInvalid => write!(f, "The issuer's signature is not valid."),
             ValidatorError::SubjectSignatureInvalid => write!(f, "The subject's signature is not valid."),
             ValidatorError::IssuerCannotSelfUpdate => write!(f, "The issuer is not allowed to self-update."),
+            ValidatorError::InvalidOperation => write!(f, "Invalid operation."),
         }
     }
 }
