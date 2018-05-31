@@ -144,6 +144,18 @@ impl FullJournal {
         self.entries.push(entry.clone());
         self.hash = entry.hash();
         match entry.operation {
+            Operation::DeviceBulkAdd { devices } => {
+                for (capabilities, subject) in devices.iter() {
+                    self.trusted_devices.insert(
+                        *subject,
+                        DeviceInfo {
+                            key: *subject,
+                            capabilities: *capabilities,
+                            entry,
+                        },
+                    );
+                }
+            }
             Operation::DeviceAdd {
                 subject,
                 capabilities,
@@ -232,15 +244,19 @@ impl FullJournal {
             }
             let first_entry = JournalEntry::decode(&mut d)?;
             let device_info =
-                FullJournal::check_first_entry(&first_entry).unwrap();
-            let mut trusted_devices = HashMap::new();
-            trusted_devices.insert(first_entry.issuer, device_info);
-            let mut journal = FullJournal {
-                journal_id: first_entry.journal_id,
-                entries: vec![first_entry.clone()],
-                trusted_devices,
-                hash: first_entry.hash(),
-            };
+                FullJournal::check_first_entry(&first_entry).unwrap(); //TODO better error handling
+
+            let mut journal = new_from_entry(first_entry);
+            journal.uncheck_add_entry(first_entry);
+
+            //            let mut trusted_devices = HashMap::new();
+            //            trusted_devices.insert(first_entry.issuer, device_info);
+            //            let mut journal = FullJournal {
+            //                journal_id: first_entry.journal_id,
+            //                entries: vec![first_entry.clone()],
+            //                trusted_devices,
+            //                hash: first_entry.hash(),
+            //            };
             if num > 1 {
                 for _ in 1..num {
                     let e = JournalEntry::decode(&mut d)?;
@@ -299,28 +315,39 @@ impl FullJournal {
         self.hash
     }
 
-    /// Find the entry that added the signer of a given entry to the journal.
-    pub fn get_parent(&self, le: &JournalEntry) -> Option<&JournalEntry> {
-        let start = le.index as usize;
+    /// Find the entry that added the given device to the journal.
+    // TODO: only used in tests; move to tests!
+    pub fn get_parent(
+        &self,
+        entry: &JournalEntry,
+    ) -> Option<&JournalEntry> {
+        let start = entry.index as usize;
         if start == 0 {
             return None;
         }
         for i in 0..start + 1 {
             let l = &self.entries[start - i];
             match l.operation {
+                Operation::DeviceBulkAdd { devices } => {
+                    for (_, subject) in devices.iter() {
+                        if *subject == entry.issuer {
+                            return Some(l);
+                        }
+                    }
+                }
                 Operation::DeviceAdd { subject, .. } => {
-                    if subject == le.issuer {
+                    if subject == entry.issuer {
                         return Some(l);
                     }
                 }
                 Operation::DeviceRemove { .. } => {}
                 Operation::DeviceReplace { added_subject, .. } => {
-                    if added_subject == le.issuer {
+                    if added_subject == entry.issuer {
                         return Some(l);
                     }
                 }
                 Operation::DeviceSelfReplace { added_subject, .. } => {
-                    if added_subject == le.issuer {
+                    if added_subject == entry.issuer {
                         return Some(l);
                     }
                 }

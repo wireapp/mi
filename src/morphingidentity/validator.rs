@@ -37,6 +37,9 @@ impl Validator {
             return Err(ValidatorError::IssuerSignatureInvalid);
         }
         match entry.operation {
+            Operation::DeviceBulkAdd { .. } => {
+                Err(ValidatorError::InvalidOperation)
+            }
             Operation::DeviceAdd { .. } => {
                 Self::validate_device_add(journal, entry)
             }
@@ -251,26 +254,28 @@ impl Validator {
     pub fn validate_first_entry(
         entry: &JournalEntry,
     ) -> Result<DeviceInfo, ValidatorError> {
+        if !entry.verify_signature(&entry.issuer, &entry.signature) {
+            return Err(ValidatorError::IssuerSignatureInvalid);
+        }
         match entry.operation {
-            Operation::DeviceAdd {
-                subject,
-                capabilities,
+            Operation::DeviceBulkAdd {
+                devices,
                 ..
             } => {
-                if subject != entry.issuer {
-                    return Err(ValidatorError::InvalidOperation);
-                }
-                if !entry.verify_signature(&entry.issuer, &entry.signature)
-                {
-                    return Err(ValidatorError::IssuerSignatureInvalid);
-                }
+                let subjects = devices.iter().map(|(x,y)| y).collect();
+
+
+                // TODO: fail if entry.issuer not in subjects
+//                        return Err(ValidatorError::InvalidOperation);
+//                    }
+
                 Ok(DeviceInfo {
                     key: subject,
                     capabilities,
                     entry: entry.clone(),
                 })
             }
-            _ => Err(ValidatorError::InvalidOperation),
+            _ => Err(ValidatorError::InvalidFirstEntry),
         }
     }
 
@@ -336,6 +341,7 @@ pub enum ValidatorError {
     IssuerCannotSelfUpdate,
     /// *All operations:* Invalid operation.
     InvalidOperation,
+    InvalidFirstEntry,
 }
 
 impl fmt::Display for ValidatorError {
@@ -360,6 +366,7 @@ impl fmt::Display for ValidatorError {
             ValidatorError::SubjectSignatureInvalid => write!(f, "The subject's signature is not valid."),
             ValidatorError::IssuerCannotSelfUpdate => write!(f, "The issuer is not allowed to self-update."),
             ValidatorError::InvalidOperation => write!(f, "Invalid operation."),
+            ValidatorError::InvalidFirstEntry => write!(f, "The first entry of a journal must be DeviceBulkAdd"),
         }
     }
 }
