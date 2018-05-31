@@ -1,5 +1,6 @@
 pub use sodiumoxide::randombytes::randombytes;
 
+use journal;
 use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::crypto::sign;
 use uuid;
@@ -108,6 +109,12 @@ impl GoodRand for sha256::Digest {
 impl GoodRand for uuid::Uuid {
     fn rand() -> uuid::Uuid {
         uuid::Uuid::from_bytes(randombytes(16).as_slice()).unwrap()
+    }
+}
+
+impl GoodRand for journal::JournalID {
+    fn rand() -> journal::JournalID {
+        journal::JournalID(GoodRand::rand())
     }
 }
 

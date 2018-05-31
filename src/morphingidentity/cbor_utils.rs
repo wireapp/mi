@@ -3,6 +3,7 @@ use cbor::decoder::{DecodeError, DecodeResult, Decoder};
 use cbor::encoder::{EncodeError, EncodeResult, Encoder};
 use cbor::value::Key;
 use cbor::Config;
+use journal::JournalID;
 use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::crypto::sign::{
     PublicKey, Signature, PUBLICKEYBYTES, SIGNATUREBYTES,
@@ -10,7 +11,6 @@ use sodiumoxide::crypto::sign::{
 use std::error::Error;
 use std::fmt;
 use std::io::{Cursor, Read};
-use uuid::Uuid;
 
 pub type EncoderVec = Encoder<Cursor<Vec<u8>>>;
 pub type DecoderVec = Decoder<Cursor<Vec<u8>>>;
@@ -179,11 +179,13 @@ pub fn ensure_array_length<R: Read>(
 
 // Decoders for various types //////////////////////////////////////////////
 
-pub fn decode_uuid<R: Read>(d: &mut Decoder<R>) -> DecodeResult<Uuid> {
+pub fn decode_journal_id<R: Read>(
+    d: &mut Decoder<R>,
+) -> DecodeResult<JournalID> {
     let b = &d.bytes()?;
-    Uuid::from_bytes(b).map_err(|_err| {
+    JournalID::from_bytes(b).map_err(|_err| {
         MIDecodeError::InvalidArrayLength {
-            type_name: "Uuid",
+            type_name: "JournalID",
             expected_length: 16,
             actual_length: b.len(),
         }.into()

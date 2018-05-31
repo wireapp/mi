@@ -4,12 +4,12 @@ extern crate sodiumoxide;
 extern crate uuid;
 
 use morphingidentity::entries::*;
-use morphingidentity::journal::FullJournal;
+use morphingidentity::journal::*;
 use morphingidentity::operation::*;
 use morphingidentity::rand_utils::{randomnumber, GoodRand};
 use morphingidentity::utils::EMPTYSIGNATURE;
-use sodiumoxide::crypto::hash;
-use sodiumoxide::crypto::sign;
+use morphingidentity::validator::*;
+use sodiumoxide::crypto::{hash, sign};
 use uuid::Uuid;
 
 /// Test that an entry can be created and signed.
@@ -24,7 +24,7 @@ fn entry_test() {
         capabilities: DeviceType::PermanentDevice as u32,
     };
     let mut je = JournalEntry::new(
-        Uuid::nil(),
+        JournalID(Uuid::nil()),
         hash::sha256::hash(&[]),
         0,
         operation,
@@ -60,10 +60,7 @@ fn entry_addition_test() {
         FullJournal::new(id, &issuer_pk, &issuer_sk).unwrap();
 
     // Check if the journal is valid
-    assert!(full_journal.check_journal());
-
-    // Test if a random entry can be added to the journal
-    // assert!(!full_journal.test_entry(&invalid_entry));
+    assert!(full_journal.check_journal().is_ok());
 
     // Get the journal version (number of entries in the journal)
     assert_eq!(full_journal.get_journal_version(), 0);
@@ -76,8 +73,7 @@ fn entry_addition_test() {
         )
     );
 
-    // Add a device (Subject) and do some tests /////////////////////////////
-
+    // Add a device (Subject) and do some tests
     // Prepare the new entry
     let second_operation = Operation::DeviceAdd {
         subject: subject_pk,
@@ -94,7 +90,10 @@ fn entry_addition_test() {
 
     // Test if the new entry can't be added to the journal
     // (the subject's signature is missing at this point)
-    assert!(!full_journal.can_add_entry(&second_entry));
+    assert_eq!(
+        full_journal.can_add_entry(&second_entry).unwrap_err(),
+        ValidatorError::SubjectSignatureInvalid
+    );
 
     // Have the subject sign the new entry (only needed when adding a device)
     let second_subject_signature = second_entry.sign(&subject_sk);
@@ -103,13 +102,13 @@ fn entry_addition_test() {
         .set_subject_signature(second_subject_signature);
 
     // Testing again now that the signature is there
-    assert!(full_journal.can_add_entry(&second_entry));
+    assert!(full_journal.can_add_entry(&second_entry).is_ok());
 
     // Adding the new entry to the journal
-    assert!(full_journal.add_entry(second_entry.clone()));
+    assert!(full_journal.add_entry(second_entry.clone()).is_ok());
 
     // Testing if the journal is still valid after that
-    assert!(full_journal.check_journal());
+    assert!(full_journal.check_journal().is_ok());
 
     // Testing if the new device is now trusted
     assert!(full_journal.is_device_trusted(&subject_pk));
@@ -126,7 +125,7 @@ fn entry_addition_test() {
     );
 
     // Adding the same entry again shouldn't work
-    assert!(!full_journal.add_entry(second_entry));
+    assert!(full_journal.add_entry(second_entry).is_err());
 
     // Display all trusted devices in the journal
     for (pk, j) in full_journal.get_trusted_devices() {
@@ -152,13 +151,13 @@ fn entry_addition_test() {
     assert_eq!(third_entry.index, 2);
 
     // Checking the new entry can be added to the journal
-    assert!(full_journal.can_add_entry(&third_entry));
+    assert!(full_journal.can_add_entry(&third_entry).is_ok());
 
     // Add the third entry to the journal
-    assert!(full_journal.add_entry(third_entry.clone()));
+    assert!(full_journal.add_entry(third_entry.clone()).is_ok());
 
     // Check if the journal is still valid after that
-    assert!(full_journal.check_journal());
+    assert!(full_journal.check_journal().is_ok());
 
     // The journal hash should have changed
     println!(
@@ -169,7 +168,7 @@ fn entry_addition_test() {
     );
 
     // Adding the third entry again shouldn't work
-    assert!(!full_journal.add_entry(third_entry));
+    assert!(!full_journal.add_entry(third_entry).is_ok());
 
     // Checking if the second device is not trusted anymore
     assert!(!full_journal.is_device_trusted(&subject_pk));
@@ -189,11 +188,10 @@ fn entry_addition_test() {
 #[test]
 fn fuzz_testing() {
     sodiumoxide::init();
-    println!("-------- Random journal ---------");
     println!("Generating {} entries", ITER);
 
     const DEVICES: usize = 8;
-    const ITER: u32 = 10;
+    const ITER: u32 = 1_000;
 
     let mut sec_keys = Vec::new();
     let mut pub_keys = Vec::new();
@@ -216,14 +214,9 @@ fn fuzz_testing() {
         let mut iss_pk = &sign::PublicKey([0; sign::PUBLICKEYBYTES]);
         let mut iss_sk;
 
-        // Let's generate an entry that makes sense: either it's an entry
-        // that adds a device which isn't in journal yet (assuming that the
-        // journal isn't full), or it's an entry that removes a device which
-        // is in the journal already (assuming that the journal won't become
-        // empty).  Thirdly, if there are at least two devices, one of them
-        // can replace another with a new one.
+        // This generates an (almost) random entry and tries to add it to the journal.
         loop {
-            // pick a trusted issuer.
+            // Pick a trusted issuer.
             let mut c = randomnumber(trusted.len() as u64) as usize;
             counter = 0;
             for e in trusted.values() {
@@ -242,7 +235,7 @@ fn fuzz_testing() {
                 .find(|&p| p.1[..] == iss_pk[..])
                 .unwrap();
 
-            // construct a random, sound operation.
+            // Construct a random operation
             iss_sk = &sec_keys[found_index.0];
 
             // Pick a random operation
@@ -289,12 +282,14 @@ fn fuzz_testing() {
                                 assert!(
                                     random_journal
                                         .can_add_entry(&new_entry)
+                                        .is_ok()
                                 );
                                 assert!(
-                                    random_journal.add_entry(new_entry)
+                                    random_journal
+                                        .add_entry(new_entry)
+                                        .is_ok()
                                 );
                                 counter += 1;
-                                println!("Adding a new device");
                                 break;
                             }
                         };
@@ -330,12 +325,14 @@ fn fuzz_testing() {
                                 assert!(
                                     random_journal
                                         .can_add_entry(&new_entry)
+                                        .is_ok()
                                 );
                                 assert!(
-                                    random_journal.add_entry(new_entry)
+                                    random_journal
+                                        .add_entry(new_entry)
+                                        .is_ok()
                                 );
                                 counter += 1;
-                                println!("Removing a device");
                                 break;
                             }
                         };
@@ -387,12 +384,14 @@ fn fuzz_testing() {
                                 assert!(
                                     random_journal
                                         .can_add_entry(&new_entry)
+                                        .is_ok()
                                 );
                                 assert!(
-                                    random_journal.add_entry(new_entry)
+                                    random_journal
+                                        .add_entry(new_entry)
+                                        .is_ok()
                                 );
                                 counter += 1;
-                                println!("Replacing a device");
                                 break;
                             }
                         };
@@ -437,12 +436,14 @@ fn fuzz_testing() {
                                 assert!(
                                     random_journal
                                         .can_add_entry(&new_entry)
+                                        .is_ok()
                                 );
                                 assert!(
-                                    random_journal.add_entry(new_entry)
+                                    random_journal
+                                        .add_entry(new_entry)
+                                        .is_ok()
                                 );
                                 counter += 1;
-                                println!("Self-replacing a device");
                                 break;
                             }
                         };
@@ -479,5 +480,5 @@ fn fuzz_testing() {
             }
         }
     }
-    assert!(random_journal.check_journal());
+    assert!(random_journal.check_journal().is_ok());
 }
