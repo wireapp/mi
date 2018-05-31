@@ -24,7 +24,7 @@ impl Validator {
         if entry.journal_id != journal.get_journal_id() {
             return Err(ValidatorError::JournalIdMismatch);
         }
-        // The index of the entry needs to maytch the next index of the journal
+        // The index of the entry needs to match the next index of the journal
         if entry.index != (last_entry.index + 1) {
             return Err(ValidatorError::IndexMismatch);
         }
@@ -51,6 +51,7 @@ impl Validator {
             }
         }
     }
+
     pub fn validate_unsigned_subject_entry(
         journal: &FullJournal,
         entry: &JournalEntry,
@@ -63,6 +64,7 @@ impl Validator {
             },
         }
     }
+
     fn validate_device_add(
         journal: &FullJournal,
         entry: &JournalEntry,
@@ -105,6 +107,7 @@ impl Validator {
             _ => unreachable!(),
         }
     }
+
     fn validate_device_remove(
         journal: &FullJournal,
         entry: &JournalEntry,
@@ -145,6 +148,7 @@ impl Validator {
             _ => unreachable!(),
         }
     }
+
     fn validate_device_replace(
         journal: &FullJournal,
         entry: &JournalEntry,
@@ -173,7 +177,7 @@ impl Validator {
                         return Err(ValidatorError::SubjectNotFound);
                     }
                 };
-                // Removed subject needst to be removable
+                // Removed subject needs to be removable
                 match journal.get_trusted_device(&removed_subject) {
                     Some(device) => {
                         if device.capability_cannot_be_removed() {
@@ -201,6 +205,7 @@ impl Validator {
             _ => unreachable!(),
         }
     }
+
     fn validate_device_self_replace(
         journal: &FullJournal,
         entry: &JournalEntry,
@@ -215,7 +220,7 @@ impl Validator {
                 match journal.get_trusted_device(&entry.issuer) {
                     Some(device) => {
                         // Issuer needs to have the self-update capability
-                        if device.capability_can_self_update() {
+                        if !device.capability_can_self_update() {
                             return Err(
                                 ValidatorError::IssuerCannotSelfUpdate,
                             );
@@ -242,6 +247,7 @@ impl Validator {
             _ => unreachable!(),
         }
     }
+
     pub fn validate_first_entry(
         entry: &JournalEntry,
     ) -> Result<DeviceInfo, ValidatorError> {
@@ -267,6 +273,7 @@ impl Validator {
             _ => Err(ValidatorError::InvalidOperation),
         }
     }
+
     pub fn validate_journal(
         journal: &FullJournal,
     ) -> Result<(), ValidatorError> {
@@ -277,12 +284,7 @@ impl Validator {
         // Check the first entry
         let first_entry: &JournalEntry = entries.first().unwrap();
         let mut new_journal: FullJournal =
-            match FullJournal::new_from_entry(first_entry) {
-                Ok(j) => j,
-                Err(e) => {
-                    return Err(e);
-                }
-            };
+            FullJournal::new_from_entry(first_entry)?;
         // Check all other entries
         for je in entries.iter().skip(1) {
             match new_journal.add_entry(je.clone()) {

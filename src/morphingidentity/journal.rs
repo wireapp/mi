@@ -96,31 +96,18 @@ impl FullJournal {
     pub fn new_from_entry(
         entry: &JournalEntry,
     ) -> Result<FullJournal, ValidatorError> {
-        match Validator::validate_first_entry(entry) {
-            Ok(device_info) => {
-                let new_entries = vec![entry.clone()];
-                let mut trusted_devices: HashMap<
-                    PublicKey,
-                    DeviceInfo,
-                > = HashMap::new();
-                trusted_devices.insert(
-                    entry.issuer,
-                    DeviceInfo {
-                        key: entry.issuer,
-                        capabilities: device_info.capabilities,
-                        entry: entry.clone(),
-                    },
-                );
-                let mut new_journal: FullJournal = FullJournal {
-                    journal_id: entry.journal_id,
-                    entries: new_entries,
-                    trusted_devices,
-                    hash: hash(&[]),
-                };
-                Ok(new_journal)
-            }
-            Err(e) => Err(e),
-        }
+        let device_info = Validator::validate_first_entry(entry)?;
+        let new_entries = vec![entry.clone()];
+        let mut trusted_devices: HashMap<PublicKey, DeviceInfo> =
+            HashMap::new();
+        trusted_devices.insert(entry.issuer, device_info);
+        let new_journal: FullJournal = FullJournal {
+            journal_id: entry.journal_id,
+            entries: new_entries,
+            trusted_devices,
+            hash: hash(&[]),
+        };
+        Ok(new_journal)
     }
 
     /// Create and return a `JournalEntry` without adding it to the
@@ -140,10 +127,8 @@ impl FullJournal {
             *issuer_pk,
         );
         entry.signature = entry.sign(issuer_sk);
-        match Validator::validate_unsigned_subject_entry(&self, &entry) {
-            Ok(()) => Ok(entry),
-            Err(e) => Err(e),
-        }
+        Validator::validate_unsigned_subject_entry(&self, &entry)?;
+        Ok(entry)
     }
 
     /// Check if given entry can be added to the journal.
@@ -160,7 +145,7 @@ impl FullJournal {
     ) -> Result<(), ValidatorError> {
         match self.can_add_entry(&entry) {
             Ok(()) => {
-                self.entries.push(entry.clone()); //TODO: make sure the entry is properly consumed
+                self.entries.push(entry.clone());
                 match entry.operation {
                     Operation::DeviceAdd {
                         subject,
@@ -216,10 +201,7 @@ impl FullJournal {
                 self.hash = self.entries.last().unwrap().hash();
                 Ok(())
             }
-            Err(e) => {
-                drop(entry);
-                Err(e)
-            }
+            Err(e) => Err(e),
         }
     }
 
