@@ -173,8 +173,8 @@ impl Validator {
                         }
                     }
                     None => {
-                        // Subject needs to be a trusted device
-                        return Err(ValidatorError::SubjectNotFound);
+                        // Issuer needs to be a trusted device
+                        return Err(ValidatorError::IssuerNotFound);
                     }
                 };
                 // Removed subject needs to be removable
