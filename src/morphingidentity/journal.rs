@@ -139,70 +139,67 @@ impl FullJournal {
         Validator::validate_entry(&self, entry)
     }
 
+    /// Add an entry to the journal without validating it.
+    fn unchecked_add_entry(&mut self, entry: JournalEntry) {
+        self.entries.push(entry.clone());
+        self.hash = entry.hash();
+        match entry.operation {
+            Operation::DeviceAdd {
+                subject,
+                capabilities,
+                ..
+            } => {
+                self.trusted_devices.insert(
+                    subject,
+                    DeviceInfo {
+                        key: subject,
+                        capabilities,
+                        entry,
+                    },
+                );
+            }
+            Operation::DeviceRemove { subject, .. } => {
+                self.trusted_devices.remove(&subject);
+            }
+            Operation::DeviceReplace {
+                removed_subject,
+                capabilities,
+                added_subject,
+                ..
+            } => {
+                self.trusted_devices.remove(&removed_subject);
+                self.trusted_devices.insert(
+                    added_subject,
+                    DeviceInfo {
+                        key: added_subject,
+                        capabilities,
+                        entry,
+                    },
+                );
+            }
+            Operation::DeviceSelfReplace { added_subject, .. } => {
+                let current_device =
+                    self.get_trusted_device(&entry.issuer).unwrap().clone();
+                self.trusted_devices.remove(&entry.issuer);
+                self.trusted_devices.insert(
+                    added_subject,
+                    DeviceInfo {
+                        key: added_subject,
+                        capabilities: current_device.capabilities,
+                        entry,
+                    },
+                );
+            }
+        };
+    }
+
     pub fn add_entry(
         &mut self,
         entry: JournalEntry,
     ) -> Result<(), ValidatorError> {
-        match self.can_add_entry(&entry) {
-            Ok(()) => {
-                self.entries.push(entry.clone());
-                match entry.operation {
-                    Operation::DeviceAdd {
-                        subject,
-                        capabilities,
-                        ..
-                    } => {
-                        self.trusted_devices.insert(
-                            subject,
-                            DeviceInfo {
-                                key: subject,
-                                capabilities,
-                                entry,
-                            },
-                        );
-                    }
-                    Operation::DeviceRemove { subject, .. } => {
-                        self.trusted_devices.remove(&subject);
-                    }
-                    Operation::DeviceReplace {
-                        removed_subject,
-                        capabilities,
-                        added_subject,
-                        ..
-                    } => {
-                        self.trusted_devices.remove(&removed_subject);
-                        self.trusted_devices.insert(
-                            added_subject,
-                            DeviceInfo {
-                                key: added_subject,
-                                capabilities,
-                                entry,
-                            },
-                        );
-                    }
-                    Operation::DeviceSelfReplace {
-                        added_subject, ..
-                    } => {
-                        let current_device = self
-                            .get_trusted_device(&entry.issuer)
-                            .unwrap()
-                            .clone();
-                        self.trusted_devices.remove(&entry.issuer);
-                        self.trusted_devices.insert(
-                            added_subject,
-                            DeviceInfo {
-                                key: added_subject,
-                                capabilities: current_device.capabilities,
-                                entry,
-                            },
-                        );
-                    }
-                };
-                self.hash = self.entries.last().unwrap().hash();
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
+        self.can_add_entry(&entry)?;
+        self.unchecked_add_entry(entry);
+        Ok(())
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
