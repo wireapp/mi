@@ -1,6 +1,8 @@
-use entries::{DeviceInfo, JournalEntry};
+use entries::{JournalEntry, is_permanent};
+use sodiumoxide::crypto::sign::ed25519::{PublicKey};
 use journal::*;
 use operation::*;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 
@@ -251,29 +253,40 @@ impl Validator {
         }
     }
 
+    /// invariants:
+    /// * first entry must be DeviceBulkAdd
+    /// * issuer has to be one of devices that are being added
+    /// * issuer has to be added with capabilities that permit device addition
+    /// * the set of devices must not contain any duplicates
     pub fn validate_first_entry(
         entry: &JournalEntry,
-    ) -> Result<DeviceInfo, ValidatorError> {
+    ) -> Result<(), ValidatorError> {
         if !entry.verify_signature(&entry.issuer, &entry.signature) {
             return Err(ValidatorError::IssuerSignatureInvalid);
         }
-        match entry.operation {
+        match entry.operation.clone() {
             Operation::DeviceBulkAdd {
                 devices,
                 ..
             } => {
-                let subjects = devices.iter().map(|(x,y)| y).collect();
-
-
-                // TODO: fail if entry.issuer not in subjects
-//                        return Err(ValidatorError::InvalidOperation);
-//                    }
-
-                Ok(DeviceInfo {
-                    key: subject,
-                    capabilities,
-                    entry: entry.clone(),
-                })
+                let subjects : HashSet<PublicKey> = devices.iter().map(|(_,s)| *s).collect();
+                // issuer has to be one of devices that are being added
+                if !subjects.contains(&entry.issuer) {
+                    return Err(ValidatorError::InvalidFirstEntry)
+                }
+                let issuer_device = devices.iter().find(|(_,s)| {*s == entry.issuer} );
+                match issuer_device {
+                    None => return Err(ValidatorError::InvalidFirstEntry),
+                    // issuer has to be added with capabilities that permit device addition
+                    Some((capabilities, _)) => if ! is_permanent(*capabilities) {
+                        return Err(ValidatorError::InvalidFirstEntry);
+                    }
+                }
+                // the set of devices must not contain any duplicates
+                if subjects.len() != devices.len() {
+                    return Err(ValidatorError::InvalidFirstEntry);
+                }
+                Ok(())
             }
             _ => Err(ValidatorError::InvalidFirstEntry),
         }
@@ -289,7 +302,7 @@ impl Validator {
         // Check the first entry
         let first_entry: &JournalEntry = entries.first().unwrap();
         let mut new_journal: FullJournal =
-            FullJournal::new_from_entry(first_entry)?;
+            FullJournal::new_from_entry(first_entry.clone())?;
         // Check all other entries
         for je in entries.iter().skip(1) {
             match new_journal.add_entry(je.clone()) {

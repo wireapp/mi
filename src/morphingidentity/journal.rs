@@ -94,19 +94,17 @@ impl FullJournal {
     }
 
     pub fn new_from_entry(
-        entry: &JournalEntry,
+        entry: JournalEntry,
     ) -> Result<FullJournal, ValidatorError> {
-        let device_info = Validator::validate_first_entry(entry)?;
-        let new_entries = vec![entry.clone()];
-        let mut trusted_devices: HashMap<PublicKey, DeviceInfo> =
-            HashMap::new();
-        trusted_devices.insert(entry.issuer, device_info);
-        let new_journal: FullJournal = FullJournal {
+        Validator::validate_first_entry(&entry)?;
+        let mut new_journal: FullJournal = FullJournal {
             journal_id: entry.journal_id,
-            entries: new_entries,
-            trusted_devices,
+            entries: Vec::new(),
+            trusted_devices: HashMap::new(),
             hash: hash(&[]),
         };
+
+        new_journal.unchecked_add_entry(entry);
         Ok(new_journal)
     }
 
@@ -143,7 +141,7 @@ impl FullJournal {
     fn unchecked_add_entry(&mut self, entry: JournalEntry) {
         self.entries.push(entry.clone());
         self.hash = entry.hash();
-        match entry.operation {
+        match entry.operation.clone() {
             Operation::DeviceBulkAdd { devices } => {
                 for (capabilities, subject) in devices.iter() {
                     self.trusted_devices.insert(
@@ -151,7 +149,7 @@ impl FullJournal {
                         DeviceInfo {
                             key: *subject,
                             capabilities: *capabilities,
-                            entry,
+                            entry: entry.clone(),
                         },
                     );
                 }
@@ -243,20 +241,14 @@ impl FullJournal {
                 return Err(MIDecodeError::EmptyJournal.into());
             }
             let first_entry = JournalEntry::decode(&mut d)?;
-            let device_info =
-                FullJournal::check_first_entry(&first_entry).unwrap(); //TODO better error handling
 
-            let mut journal = new_from_entry(first_entry);
-            journal.uncheck_add_entry(first_entry);
+            let mut journal  = match FullJournal::new_from_entry(first_entry) {
+                Ok(j) => { j },
+                Err(err) => {
+                    return Err(DecodeError::Other(From::from(err)))
+                }
+            };
 
-            //            let mut trusted_devices = HashMap::new();
-            //            trusted_devices.insert(first_entry.issuer, device_info);
-            //            let mut journal = FullJournal {
-            //                journal_id: first_entry.journal_id,
-            //                entries: vec![first_entry.clone()],
-            //                trusted_devices,
-            //                hash: first_entry.hash(),
-            //            };
             if num > 1 {
                 for _ in 1..num {
                     let e = JournalEntry::decode(&mut d)?;
@@ -267,15 +259,6 @@ impl FullJournal {
             }
             Ok(journal)
         })
-    }
-
-    /// Check that the root entry of the journal is what we expect (a
-    /// self-signed addition entry). In case it is, return `DeviceInfo`
-    /// corresponding to the root device.
-    fn check_first_entry(
-        entry: &JournalEntry,
-    ) -> Result<DeviceInfo, ValidatorError> {
-        Validator::validate_first_entry(entry)
     }
 
     /// Verify all invariants of the entire journal.
@@ -327,7 +310,7 @@ impl FullJournal {
         }
         for i in 0..start + 1 {
             let l = &self.entries[start - i];
-            match l.operation {
+            match l.operation.clone() {
                 Operation::DeviceBulkAdd { devices } => {
                     for (_, subject) in devices.iter() {
                         if *subject == entry.issuer {

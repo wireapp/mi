@@ -97,7 +97,7 @@ impl Operation {
     pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
         match *self {
             Operation::DeviceBulkAdd {
-                devices
+                ref devices
             } =>  {
                 e.array(2)?;
                 e.u32(TAG_DEVICE_BULK_ADD)?;

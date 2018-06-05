@@ -29,6 +29,14 @@ pub enum DeviceType {
         | CapType::SelfUpdateCap as u32,
 }
 
+pub fn is_permanent(capabilities: u32) -> bool {
+    capabilities & DeviceType::PermanentDevice as u32 == DeviceType::PermanentDevice as u32
+}
+
+pub fn is_temporary(capabilities: u32) -> bool {
+    capabilities == DeviceType::TemporaryDevice as u32
+}
+
 /// Information about a trusted device.
 #[derive(PartialEq, Clone, Debug)]
 pub struct DeviceInfo {

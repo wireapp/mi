@@ -27,10 +27,10 @@ impl ShortJournal {
         {
             return false;
         }
-        match le.operation {
+        match le.operation.clone() {
             // TODO code duplication, see TODOs above.
             Operation::DeviceBulkAdd {
-                devices, ..
+                ..
             } => {
                  false // BulkAdd is only valid the first time.
             }
