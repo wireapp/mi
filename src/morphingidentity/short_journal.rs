@@ -29,10 +29,8 @@ impl ShortJournal {
         }
         match le.operation.clone() {
             // TODO code duplication, see TODOs above.
-            Operation::DeviceBulkAdd {
-                ..
-            } => {
-                 false // BulkAdd is only valid the first time.
+            Operation::DeviceBulkAdd { .. } => {
+                false // BulkAdd is only valid the first time.
             }
             Operation::DeviceAdd {
                 subject,

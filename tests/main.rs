@@ -205,9 +205,12 @@ fn fuzz_testing() {
     }
 
     let devices = vec![(DeviceType::PermanentDevice as u32, pub_keys[0])];
-    let mut random_journal =
-        FullJournal::new(GoodRand::rand(), &pub_keys[0], &sec_keys[0], devices)
-            .unwrap();
+    let mut random_journal = FullJournal::new(
+        GoodRand::rand(),
+        &pub_keys[0],
+        &sec_keys[0],
+        devices,
+    ).unwrap();
 
     for _i in 0..ITER - 1 {
         let trusted = random_journal.get_trusted_devices().clone();

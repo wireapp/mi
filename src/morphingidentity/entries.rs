@@ -30,7 +30,8 @@ pub enum DeviceType {
 }
 
 pub fn is_permanent(capabilities: u32) -> bool {
-    capabilities & DeviceType::PermanentDevice as u32 == DeviceType::PermanentDevice as u32
+    capabilities & DeviceType::PermanentDevice as u32
+        == DeviceType::PermanentDevice as u32
 }
 
 pub fn is_temporary(capabilities: u32) -> bool {
@@ -331,8 +332,7 @@ mod tests {
     /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
         match <u32 as GoodRand>::rand() % OPERATIONS {
-            TAG_DEVICE_BULK_ADD =>  {
-
+            TAG_DEVICE_BULK_ADD => {
                 let mut d = Vec::new();
                 let bound = randomnumber(16);
                 for _i in 0..=bound {
@@ -341,9 +341,7 @@ mod tests {
                     d.push((cap, sub));
                 }
 
-                Operation::DeviceBulkAdd {
-                    devices: d
-                }
+                Operation::DeviceBulkAdd { devices: d }
             }
             TAG_DEVICE_ADD => Operation::DeviceAdd {
                 capabilities: GoodRand::rand(),

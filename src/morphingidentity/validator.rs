@@ -1,7 +1,7 @@
-use entries::{JournalEntry, is_permanent};
-use sodiumoxide::crypto::sign::ed25519::{PublicKey};
+use entries::{is_permanent, JournalEntry};
 use journal::*;
 use operation::*;
+use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
@@ -265,21 +265,22 @@ impl Validator {
             return Err(ValidatorError::IssuerSignatureInvalid);
         }
         match entry.operation.clone() {
-            Operation::DeviceBulkAdd {
-                devices,
-                ..
-            } => {
-                let subjects : HashSet<PublicKey> = devices.iter().map(|(_,s)| *s).collect();
+            Operation::DeviceBulkAdd { devices, .. } => {
+                let subjects: HashSet<PublicKey> =
+                    devices.iter().map(|(_, s)| *s).collect();
                 // issuer has to be one of devices that are being added
                 if !subjects.contains(&entry.issuer) {
-                    return Err(ValidatorError::InvalidFirstEntry)
+                    return Err(ValidatorError::InvalidFirstEntry);
                 }
-                let issuer_device = devices.iter().find(|(_,s)| {*s == entry.issuer} );
+                let issuer_device =
+                    devices.iter().find(|(_, s)| *s == entry.issuer);
                 match issuer_device {
                     None => return Err(ValidatorError::InvalidFirstEntry),
                     // issuer has to be added with capabilities that permit device addition
-                    Some((capabilities, _)) => if ! is_permanent(*capabilities) {
-                        return Err(ValidatorError::InvalidFirstEntry);
+                    Some((capabilities, _)) => {
+                        if !is_permanent(*capabilities) {
+                            return Err(ValidatorError::InvalidFirstEntry);
+                        }
                     }
                 }
                 // the set of devices must not contain any duplicates
@@ -343,7 +344,9 @@ pub enum ValidatorError {
     SubjectNotRemovable,
     /// *Addition:* There can be at most `device_limit` trusted devices at
     /// any time, and this limit has been exceeded.
-    TooManyTrustedDevices { device_limit: usize },
+    TooManyTrustedDevices {
+        device_limit: usize,
+    },
     /// *Removal:* The last trusted device cannot be removed from the journal.
     TooFewTrustedDevices,
     /// *All operations:* The issuer's signature is not valid.

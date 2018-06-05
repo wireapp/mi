@@ -56,11 +56,9 @@ impl FullJournal {
         _journal_id: JournalID,
         issuer_pk: &PublicKey,
         issuer_sk: &SecretKey,
-        devices: Vec<(u32, PublicKey)>
+        devices: Vec<(u32, PublicKey)>,
     ) -> Result<FullJournal, ValidatorError> {
-        let initial_operation = Operation::DeviceBulkAdd {
-            devices
-        };
+        let initial_operation = Operation::DeviceBulkAdd { devices };
         let mut entry = JournalEntry::new(
             _journal_id,
             hash(&[]),
@@ -223,11 +221,10 @@ impl FullJournal {
             }
             let first_entry = JournalEntry::decode(&mut d)?;
 
-            let mut journal  = match FullJournal::new_from_entry(first_entry) {
-                Ok(j) => { j },
-                Err(err) => {
-                    return Err(DecodeError::Other(From::from(err)))
-                }
+            let mut journal = match FullJournal::new_from_entry(first_entry)
+            {
+                Ok(j) => j,
+                Err(err) => return Err(DecodeError::Other(From::from(err))),
             };
 
             if num > 1 {
