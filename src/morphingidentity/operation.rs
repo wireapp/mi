@@ -168,11 +168,10 @@ impl Operation {
         };
         match tag {
             TAG_DEVICE_BULK_ADD => {
-                check_length(2, "Operation::DeviceBulkAdd AAAAA")?;
-
+                check_length(2, "Operation::DeviceBulkAdd")?;
                 let mut res = Vec::new();
-                let blubb = d.array()?;
-                for _ in 0..blubb {
+                let length = d.array()?;
+                for _ in 0..length {
                     ensure_array_length(
                         d,
                         "Operation::DeviceBulkAdd::(u32,PublicKey)",
