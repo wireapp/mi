@@ -335,7 +335,7 @@ mod tests {
 
                 let mut d = Vec::new();
                 let bound = randomnumber(16);
-                for i in 0..=bound {
+                for _i in 0..=bound {
                     let sub: PublicKey = GoodRand::rand();
                     let cap: u32 = GoodRand::rand();
                     d.push((cap, sub));

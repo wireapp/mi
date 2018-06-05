@@ -2,12 +2,11 @@ use cbor::{DecodeError, DecodeResult};
 use cbor_utils::{
     ensure_array_length, run_decoder_full, run_encoder, MIDecodeError,
 };
-use entries::{DeviceInfo, DeviceType, JournalEntry};
+use entries::{DeviceInfo, JournalEntry};
 use operation::Operation;
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
-use utils::EMPTYSIGNATURE;
 use uuid::{ParseError, Uuid};
 use validator::{Validator, ValidatorError};
 
@@ -57,11 +56,10 @@ impl FullJournal {
         _journal_id: JournalID,
         issuer_pk: &PublicKey,
         issuer_sk: &SecretKey,
-    ) -> Option<FullJournal> {
-        let initial_operation = Operation::DeviceAdd {
-            subject: *issuer_pk,
-            subject_signature: EMPTYSIGNATURE,
-            capabilities: DeviceType::PermanentDevice as u32,
+        devices: Vec<(u32, PublicKey)>
+    ) -> Result<FullJournal, ValidatorError> {
+        let initial_operation = Operation::DeviceBulkAdd {
+            devices
         };
         let mut entry = JournalEntry::new(
             _journal_id,
@@ -73,24 +71,7 @@ impl FullJournal {
         let signature = entry.sign(issuer_sk);
         entry.signature = signature;
         entry.operation.set_subject_signature(signature);
-        let mut entries: Vec<JournalEntry> = Vec::new();
-        entries.push(entry.clone());
-        let mut _trusted_devices: HashMap<PublicKey, DeviceInfo> =
-            HashMap::new();
-        _trusted_devices.insert(
-            *issuer_pk,
-            DeviceInfo {
-                key: *issuer_pk,
-                capabilities: DeviceType::PermanentDevice as u32,
-                entry: entry.clone(),
-            },
-        );
-        Some(FullJournal {
-            journal_id: _journal_id,
-            entries,
-            trusted_devices: _trusted_devices,
-            hash: hash(&[]),
-        })
+        FullJournal::new_from_entry(entry)
     }
 
     pub fn new_from_entry(
