@@ -331,6 +331,20 @@ mod tests {
     /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
         match <u32 as GoodRand>::rand() % OPERATIONS {
+            TAG_DEVICE_BULK_ADD =>  {
+
+                let mut d = Vec::new();
+                let bound = randomnumber(16);
+                for i in 0..=bound {
+                    let sub: PublicKey = GoodRand::rand();
+                    let cap: u32 = GoodRand::rand();
+                    d.push((cap, sub));
+                }
+
+                Operation::DeviceBulkAdd {
+                    devices: d
+                }
+            }
             TAG_DEVICE_ADD => Operation::DeviceAdd {
                 capabilities: GoodRand::rand(),
                 subject: GoodRand::rand(),
