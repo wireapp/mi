@@ -1,4 +1,4 @@
-use cbor::{DecodeError, DecodeResult, Decoder, EncodeResult, Encoder};
+use cbor::{DecodeResult, Decoder, EncodeResult, Encoder};
 use sodiumoxide::crypto::sign::*;
 use std::io::{Read, Write};
 
@@ -152,25 +152,11 @@ impl Operation {
         use cbor_utils::*;
         let len = d.array()?;
         let tag = d.u32()?;
-        // similar to cbor_utils::ensure_array_length TODO: unify the functions?
-        let check_length = |expected_length: usize,
-                            type_name: &'static str|
-         -> Result<(), DecodeError> {
-            if len != expected_length {
-                Err(MIDecodeError::InvalidArrayLength {
-                    type_name,
-                    expected_length,
-                    actual_length: len,
-                }.into())
-            } else {
-                Ok(())
-            }
-        };
         match tag {
             TAG_DEVICE_BULK_ADD => {
-                check_length(2, "Operation::DeviceBulkAdd")?;
-                let mut res = Vec::new();
+                check_array_length("Operation::DeviceBulkAdd", 2, len)?;
                 let length = d.array()?;
+                let mut devices = Vec::new();
                 for _ in 0..length {
                     ensure_array_length(
                         d,
@@ -179,19 +165,12 @@ impl Operation {
                     )?;
                     let cap = d.u32()?;
                     let subject = decode_publickey(d)?;
-                    res.push((cap, subject));
+                    devices.push((cap, subject));
                 }
-
-                Ok(Operation::DeviceBulkAdd { devices: res })
+                Ok(Operation::DeviceBulkAdd { devices })
             }
             TAG_DEVICE_ADD => {
-                if len != 4 {
-                    return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::DeviceAdd",
-                        expected_length: 4,
-                        actual_length: len,
-                    }.into());
-                }
+                check_array_length("Operation::DeviceAdd", 4, len)?;
                 Ok(Operation::DeviceAdd {
                     capabilities: d.u32()?,
                     subject: decode_publickey(d)?,
@@ -199,25 +178,13 @@ impl Operation {
                 })
             }
             TAG_DEVICE_REMOVE => {
-                if len != 2 {
-                    return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::DeviceRemove",
-                        expected_length: 2,
-                        actual_length: len,
-                    }.into());
-                }
+                check_array_length("Operation::DeviceRemove", 2, len)?;
                 Ok(Operation::DeviceRemove {
                     subject: decode_publickey(d)?,
                 })
             }
             TAG_DEVICE_REPLACE => {
-                if len != 5 {
-                    return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::DeviceReplace",
-                        expected_length: 5,
-                        actual_length: len,
-                    }.into());
-                }
+                check_array_length("Operation::DeviceReplace", 5, len)?;
                 Ok(Operation::DeviceReplace {
                     removed_subject: decode_publickey(d)?,
                     capabilities: d.u32()?,
@@ -226,13 +193,7 @@ impl Operation {
                 })
             }
             TAG_DEVICE_SELF_REPLACE => {
-                if len != 3 {
-                    return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::DeviceSelfReplace",
-                        expected_length: 3,
-                        actual_length: len,
-                    }.into());
-                }
+                check_array_length("Operation::DeviceSelfReplace", 3, len)?;
                 Ok(Operation::DeviceSelfReplace {
                     added_subject: decode_publickey(d)?,
                     added_subject_signature: decode_signature(d)?,
