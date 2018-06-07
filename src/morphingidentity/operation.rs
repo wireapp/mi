@@ -5,6 +5,15 @@ use std::io::{Read, Write};
 /// Specific operation done by an entry.
 #[derive(PartialEq, Clone, Debug)]
 pub enum Operation {
+    JournalInit {
+        /// Devices that should be present in the journal, along with their
+        /// capabilities.
+        devices: Vec<(u32, PublicKey)>,
+        // TODO JournalInit with an empty vector should never be allowed. non_empty crate?
+        //TODO: create a new type later
+        // TODO: newtype u32 capabilities
+    },
+
     /// Add a new device to the journal.
     DeviceAdd {
         /// Capabilities of the newly added device.
@@ -47,17 +56,20 @@ pub enum Operation {
 }
 
 /// Number of different operations that we have currently.
-pub const OPERATIONS: u32 = 4;
+// TODO: use an enum here? Seems error-prone to have separate TAGS and size of amount of TAGS as constants
+pub const OPERATIONS: u32 = 5;
 
 /// Tags used for CBOR encoding/decoding
-pub const TAG_DEVICE_ADD: u32 = 0;
-pub const TAG_DEVICE_REMOVE: u32 = 1;
-pub const TAG_DEVICE_REPLACE: u32 = 2;
-pub const TAG_DEVICE_SELF_REPLACE: u32 = 3;
+pub const TAG_DEVICE_BULK_ADD: u32 = 0;
+pub const TAG_DEVICE_ADD: u32 = 1;
+pub const TAG_DEVICE_REMOVE: u32 = 2;
+pub const TAG_DEVICE_REPLACE: u32 = 3;
+pub const TAG_DEVICE_SELF_REPLACE: u32 = 4;
 
 impl Operation {
     pub fn set_subject_signature(&mut self, signature: Signature) {
         match *self {
+            Operation::JournalInit { .. } => {}
             Operation::DeviceAdd {
                 ref mut subject_signature,
                 ..
@@ -82,6 +94,17 @@ impl Operation {
 
     pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
         match *self {
+            Operation::JournalInit { ref devices } => {
+                e.array(2)?;
+                e.u32(TAG_DEVICE_BULK_ADD)?;
+                e.array(devices.len())?;
+                for (capabilities, subject) in devices.iter() {
+                    e.array(2)?;
+                    e.u32(*capabilities)?;
+                    e.bytes(&subject[..])?;
+                }
+                Ok(())
+            }
             Operation::DeviceAdd {
                 capabilities,
                 subject,
@@ -132,14 +155,24 @@ impl Operation {
         let len = d.array()?;
         let tag = d.u32()?;
         match tag {
-            TAG_DEVICE_ADD => {
-                if len != 4 {
-                    return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::DeviceAdd",
-                        expected_length: 4,
-                        actual_length: len,
-                    }.into());
+            TAG_DEVICE_BULK_ADD => {
+                check_array_length("Operation::JournalInit", 2, len)?;
+                let length = d.array()?;
+                let mut devices = Vec::new();
+                for _ in 0..length {
+                    ensure_array_length(
+                        d,
+                        "Operation::JournalInit::(u32,PublicKey)",
+                        2,
+                    )?;
+                    let cap = d.u32()?;
+                    let subject = decode_publickey(d)?;
+                    devices.push((cap, subject));
                 }
+                Ok(Operation::JournalInit { devices })
+            }
+            TAG_DEVICE_ADD => {
+                check_array_length("Operation::DeviceAdd", 4, len)?;
                 Ok(Operation::DeviceAdd {
                     capabilities: d.u32()?,
                     subject: decode_publickey(d)?,
@@ -147,25 +180,13 @@ impl Operation {
                 })
             }
             TAG_DEVICE_REMOVE => {
-                if len != 2 {
-                    return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::DeviceRemove",
-                        expected_length: 2,
-                        actual_length: len,
-                    }.into());
-                }
+                check_array_length("Operation::DeviceRemove", 2, len)?;
                 Ok(Operation::DeviceRemove {
                     subject: decode_publickey(d)?,
                 })
             }
             TAG_DEVICE_REPLACE => {
-                if len != 5 {
-                    return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::DeviceReplace",
-                        expected_length: 5,
-                        actual_length: len,
-                    }.into());
-                }
+                check_array_length("Operation::DeviceReplace", 5, len)?;
                 Ok(Operation::DeviceReplace {
                     removed_subject: decode_publickey(d)?,
                     capabilities: d.u32()?,
@@ -174,13 +195,7 @@ impl Operation {
                 })
             }
             TAG_DEVICE_SELF_REPLACE => {
-                if len != 3 {
-                    return Err(MIDecodeError::InvalidArrayLength {
-                        type_name: "Operation::DeviceSelfReplace",
-                        expected_length: 3,
-                        actual_length: len,
-                    }.into());
-                }
+                check_array_length("Operation::DeviceSelfReplace", 3, len)?;
                 Ok(Operation::DeviceSelfReplace {
                     added_subject: decode_publickey(d)?,
                     added_subject_signature: decode_signature(d)?,

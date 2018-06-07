@@ -56,8 +56,9 @@ fn entry_addition_test() {
 
     // Create a new journal with random journal ID and one entry self-signed
     // by Issuer
+    let devices = vec![(DeviceType::PermanentDevice as u32, issuer_pk)];
     let mut full_journal =
-        FullJournal::new(id, &issuer_pk, &issuer_sk).unwrap();
+        FullJournal::new(id, &issuer_pk, &issuer_sk, devices).unwrap();
 
     // Check if the journal is valid
     assert!(full_journal.check_journal().is_ok());
@@ -197,17 +198,21 @@ fn fuzz_testing() {
     let mut pub_keys = Vec::new();
 
     // Create a pool of devices we can add and remove
-    for _i in 0..DEVICES {
+    for _ in 0..DEVICES {
         let (p_key, s_key) = sign::gen_keypair();
         sec_keys.push(s_key);
         pub_keys.push(p_key);
     }
 
-    let mut random_journal =
-        FullJournal::new(GoodRand::rand(), &pub_keys[0], &sec_keys[0])
-            .unwrap();
+    let devices = vec![(DeviceType::PermanentDevice as u32, pub_keys[0])];
+    let mut random_journal = FullJournal::new(
+        GoodRand::rand(),
+        &pub_keys[0],
+        &sec_keys[0],
+        devices,
+    ).unwrap();
 
-    for _i in 0..ITER - 1 {
+    for _ in 0..ITER - 1 {
         let trusted = random_journal.get_trusted_devices().clone();
         let mut issuer;
         let mut counter;
@@ -243,6 +248,9 @@ fn fuzz_testing() {
                 randomnumber(OPERATIONS as u64) as u32;
 
             match next_operation_index {
+                TAG_DEVICE_BULK_ADD => {
+                    continue;
+                }
                 TAG_DEVICE_ADD => {
                     // Adding a new device from the pool
                     let mut inner_counter = 0;

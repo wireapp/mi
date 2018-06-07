@@ -167,14 +167,25 @@ pub fn ensure_array_length<R: Read>(
     expected_length: usize,
 ) -> DecodeResult<()> {
     let actual_length = d.array()?;
+    check_array_length(type_name, expected_length, actual_length)
+}
+
+/// Check that parsed header of an array has a specific length and throw an
+/// error otherwise.
+pub fn check_array_length(
+    type_name: &'static str,
+    expected_length: usize,
+    actual_length: usize,
+) -> DecodeResult<()> {
     if actual_length != expected_length {
-        return Err(MIDecodeError::InvalidArrayLength {
+        Err(MIDecodeError::InvalidArrayLength {
             type_name,
             expected_length,
             actual_length,
-        }.into());
-    };
-    Ok(())
+        }.into())
+    } else {
+        Ok(())
+    }
 }
 
 // Decoders for various types //////////////////////////////////////////////

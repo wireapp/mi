@@ -1,6 +1,8 @@
-use entries::{DeviceInfo, JournalEntry};
+use entries::{is_permanent, JournalEntry};
 use journal::*;
 use operation::*;
+use sodiumoxide::crypto::sign::ed25519::PublicKey;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 
@@ -37,6 +39,9 @@ impl Validator {
             return Err(ValidatorError::IssuerSignatureInvalid);
         }
         match entry.operation {
+            Operation::JournalInit { .. } => {
+                Err(ValidatorError::InvalidOperation)
+            }
             Operation::DeviceAdd { .. } => {
                 Self::validate_device_add(journal, entry)
             }
@@ -248,30 +253,51 @@ impl Validator {
         }
     }
 
-    pub fn validate_first_entry(
+    /// invariants:
+    /// * the entry must be JournalInit
+    /// * there should be [1..MAX_DEVICES] in total
+    /// * issuer has to be one of devices that are being added
+    /// * issuer has to be added with capabilities that permit device addition
+    /// * the set of devices must not contain any duplicates
+    pub fn validate_journal_init(
         entry: &JournalEntry,
-    ) -> Result<DeviceInfo, ValidatorError> {
-        match entry.operation {
-            Operation::DeviceAdd {
-                subject,
-                capabilities,
-                ..
-            } => {
-                if subject != entry.issuer {
-                    return Err(ValidatorError::InvalidOperation);
+    ) -> Result<(), ValidatorError> {
+        match entry.operation.clone() {
+            Operation::JournalInit { devices, .. } => {
+                if entry.index != 0 {
+                    return Err(ValidatorError::InvalidJournalInit);
                 }
-                if !entry.verify_signature(&entry.issuer, &entry.signature)
-                {
-                    return Err(ValidatorError::IssuerSignatureInvalid);
+                if devices.len() < 1 || devices.len() > MAX_DEVICES {
+                    return Err(ValidatorError::InvalidJournalInit);
                 }
-                Ok(DeviceInfo {
-                    key: subject,
-                    capabilities,
-                    entry: entry.clone(),
-                })
+                let subjects: HashSet<PublicKey> =
+                    devices.iter().map(|(_, s)| *s).collect();
+                // issuer has to be one of devices that are being added
+                if !subjects.contains(&entry.issuer) {
+                    return Err(ValidatorError::InvalidJournalInit);
+                }
+                let issuer_device =
+                    devices.iter().find(|(_, s)| *s == entry.issuer);
+                match issuer_device {
+                    None => return Err(ValidatorError::InvalidJournalInit),
+                    // issuer has to be added with capabilities that permit device addition
+                    Some((capabilities, _)) => {
+                        if !is_permanent(*capabilities) {
+                            return Err(ValidatorError::InvalidJournalInit);
+                        }
+                    }
+                }
+                // the set of devices must not contain any duplicates
+                if subjects.len() != devices.len() {
+                    return Err(ValidatorError::InvalidJournalInit);
+                }
             }
-            _ => Err(ValidatorError::InvalidOperation),
+            _ => return Err(ValidatorError::InvalidOperation),
         }
+        if !entry.verify_signature(&entry.issuer, &entry.signature) {
+            return Err(ValidatorError::IssuerSignatureInvalid);
+        }
+        Ok(())
     }
 
     pub fn validate_journal(
@@ -284,7 +310,7 @@ impl Validator {
         // Check the first entry
         let first_entry: &JournalEntry = entries.first().unwrap();
         let mut new_journal: FullJournal =
-            FullJournal::new_from_entry(first_entry)?;
+            FullJournal::new_from_entry(first_entry.clone())?;
         // Check all other entries
         for je in entries.iter().skip(1) {
             match new_journal.add_entry(je.clone()) {
@@ -334,8 +360,11 @@ pub enum ValidatorError {
     SubjectSignatureInvalid,
     /// *Self-update:* The issuer is not allowed to self-update.
     IssuerCannotSelfUpdate,
-    /// *All operations:* Invalid operation.
+    /// *All operations:* Invalid operation (e.g. `JournalInit` is not the
+    /// first entry, or the first entry is not `JournalInit`)
     InvalidOperation,
+    /// *Journal init:* something is wrong.
+    InvalidJournalInit,
 }
 
 impl fmt::Display for ValidatorError {
@@ -360,6 +389,7 @@ impl fmt::Display for ValidatorError {
             ValidatorError::SubjectSignatureInvalid => write!(f, "The subject's signature is not valid."),
             ValidatorError::IssuerCannotSelfUpdate => write!(f, "The issuer is not allowed to self-update."),
             ValidatorError::InvalidOperation => write!(f, "Invalid operation."),
+            ValidatorError::InvalidJournalInit => write!(f, "Something is wrong about JournalInit."),
         }
     }
 }

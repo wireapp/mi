@@ -29,6 +29,15 @@ pub enum DeviceType {
         | CapType::SelfUpdateCap as u32,
 }
 
+pub fn is_permanent(capabilities: u32) -> bool {
+    capabilities & DeviceType::PermanentDevice as u32
+        == DeviceType::PermanentDevice as u32
+}
+
+pub fn is_temporary(capabilities: u32) -> bool {
+    capabilities == DeviceType::TemporaryDevice as u32
+}
+
 /// Information about a trusted device.
 #[derive(PartialEq, Clone, Debug)]
 pub struct DeviceInfo {
@@ -323,6 +332,16 @@ mod tests {
     /// Produce a random `Operation`.
     fn rand_operation() -> Operation {
         match <u32 as GoodRand>::rand() % OPERATIONS {
+            TAG_DEVICE_BULK_ADD => {
+                let mut devices = Vec::new();
+                let bound = randomnumber(16);
+                for _ in 0..=bound {
+                    let sub: PublicKey = GoodRand::rand();
+                    let cap: u32 = GoodRand::rand();
+                    devices.push((cap, sub));
+                }
+                Operation::JournalInit { devices }
+            }
             TAG_DEVICE_ADD => Operation::DeviceAdd {
                 capabilities: GoodRand::rand(),
                 subject: GoodRand::rand(),

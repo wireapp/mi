@@ -2,12 +2,11 @@ use cbor::{DecodeError, DecodeResult};
 use cbor_utils::{
     ensure_array_length, run_decoder_full, run_encoder, MIDecodeError,
 };
-use entries::{DeviceInfo, DeviceType, JournalEntry};
+use entries::{DeviceInfo, JournalEntry};
 use operation::Operation;
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
-use utils::EMPTYSIGNATURE;
 use uuid::{ParseError, Uuid};
 use validator::{Validator, ValidatorError};
 
@@ -57,12 +56,9 @@ impl FullJournal {
         _journal_id: JournalID,
         issuer_pk: &PublicKey,
         issuer_sk: &SecretKey,
-    ) -> Option<FullJournal> {
-        let initial_operation = Operation::DeviceAdd {
-            subject: *issuer_pk,
-            subject_signature: EMPTYSIGNATURE,
-            capabilities: DeviceType::PermanentDevice as u32,
-        };
+        devices: Vec<(u32, PublicKey)>,
+    ) -> Result<FullJournal, ValidatorError> {
+        let initial_operation = Operation::JournalInit { devices };
         let mut entry = JournalEntry::new(
             _journal_id,
             hash(&[]),
@@ -73,40 +69,21 @@ impl FullJournal {
         let signature = entry.sign(issuer_sk);
         entry.signature = signature;
         entry.operation.set_subject_signature(signature);
-        let mut entries: Vec<JournalEntry> = Vec::new();
-        entries.push(entry.clone());
-        let mut _trusted_devices: HashMap<PublicKey, DeviceInfo> =
-            HashMap::new();
-        _trusted_devices.insert(
-            *issuer_pk,
-            DeviceInfo {
-                key: *issuer_pk,
-                capabilities: DeviceType::PermanentDevice as u32,
-                entry: entry.clone(),
-            },
-        );
-        Some(FullJournal {
-            journal_id: _journal_id,
-            entries,
-            trusted_devices: _trusted_devices,
-            hash: hash(&[]),
-        })
+        FullJournal::new_from_entry(entry)
     }
 
     pub fn new_from_entry(
-        entry: &JournalEntry,
+        entry: JournalEntry,
     ) -> Result<FullJournal, ValidatorError> {
-        let device_info = Validator::validate_first_entry(entry)?;
-        let new_entries = vec![entry.clone()];
-        let mut trusted_devices: HashMap<PublicKey, DeviceInfo> =
-            HashMap::new();
-        trusted_devices.insert(entry.issuer, device_info);
-        let new_journal: FullJournal = FullJournal {
+        Validator::validate_journal_init(&entry)?;
+        let mut new_journal: FullJournal = FullJournal {
             journal_id: entry.journal_id,
-            entries: new_entries,
-            trusted_devices,
+            entries: Vec::new(),
+            trusted_devices: HashMap::new(),
             hash: hash(&[]),
         };
+
+        new_journal.unchecked_add_entry(entry);
         Ok(new_journal)
     }
 
@@ -143,7 +120,19 @@ impl FullJournal {
     fn unchecked_add_entry(&mut self, entry: JournalEntry) {
         self.entries.push(entry.clone());
         self.hash = entry.hash();
-        match entry.operation {
+        match entry.operation.clone() {
+            Operation::JournalInit { devices } => {
+                for (capabilities, subject) in devices.iter() {
+                    self.trusted_devices.insert(
+                        *subject,
+                        DeviceInfo {
+                            key: *subject,
+                            capabilities: *capabilities,
+                            entry: entry.clone(),
+                        },
+                    );
+                }
+            }
             Operation::DeviceAdd {
                 subject,
                 capabilities,
@@ -231,16 +220,13 @@ impl FullJournal {
                 return Err(MIDecodeError::EmptyJournal.into());
             }
             let first_entry = JournalEntry::decode(&mut d)?;
-            let device_info =
-                FullJournal::check_first_entry(&first_entry).unwrap();
-            let mut trusted_devices = HashMap::new();
-            trusted_devices.insert(first_entry.issuer, device_info);
-            let mut journal = FullJournal {
-                journal_id: first_entry.journal_id,
-                entries: vec![first_entry.clone()],
-                trusted_devices,
-                hash: first_entry.hash(),
+
+            let mut journal = match FullJournal::new_from_entry(first_entry)
+            {
+                Ok(j) => j,
+                Err(err) => return Err(DecodeError::Other(From::from(err))),
             };
+
             if num > 1 {
                 for _ in 1..num {
                     let e = JournalEntry::decode(&mut d)?;
@@ -251,15 +237,6 @@ impl FullJournal {
             }
             Ok(journal)
         })
-    }
-
-    /// Check that the root entry of the journal is what we expect (a
-    /// self-signed addition entry). In case it is, return `DeviceInfo`
-    /// corresponding to the root device.
-    fn check_first_entry(
-        entry: &JournalEntry,
-    ) -> Result<DeviceInfo, ValidatorError> {
-        Validator::validate_first_entry(entry)
     }
 
     /// Verify all invariants of the entire journal.
@@ -299,28 +276,39 @@ impl FullJournal {
         self.hash
     }
 
-    /// Find the entry that added the signer of a given entry to the journal.
-    pub fn get_parent(&self, le: &JournalEntry) -> Option<&JournalEntry> {
-        let start = le.index as usize;
+    /// Find the entry that added the signer of the given entry to the
+    /// journal.
+    pub fn get_parent(
+        &self,
+        entry: &JournalEntry,
+    ) -> Option<&JournalEntry> {
+        let start = entry.index as usize;
         if start == 0 {
             return None;
         }
         for i in 0..start + 1 {
             let l = &self.entries[start - i];
-            match l.operation {
+            match l.operation.clone() {
+                Operation::JournalInit { devices } => {
+                    for (_, subject) in devices.iter() {
+                        if *subject == entry.issuer {
+                            return Some(l);
+                        }
+                    }
+                }
                 Operation::DeviceAdd { subject, .. } => {
-                    if subject == le.issuer {
+                    if subject == entry.issuer {
                         return Some(l);
                     }
                 }
                 Operation::DeviceRemove { .. } => {}
                 Operation::DeviceReplace { added_subject, .. } => {
-                    if added_subject == le.issuer {
+                    if added_subject == entry.issuer {
                         return Some(l);
                     }
                 }
                 Operation::DeviceSelfReplace { added_subject, .. } => {
-                    if added_subject == le.issuer {
+                    if added_subject == entry.issuer {
                         return Some(l);
                     }
                 }

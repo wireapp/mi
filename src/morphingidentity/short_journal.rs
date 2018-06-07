@@ -27,8 +27,11 @@ impl ShortJournal {
         {
             return false;
         }
-        match le.operation {
+        match le.operation.clone() {
             // TODO code duplication, see TODOs above.
+            Operation::JournalInit { .. } => {
+                false // we assume that the journal has already been initialized
+            }
             Operation::DeviceAdd {
                 subject,
                 subject_signature,
@@ -82,6 +85,7 @@ impl ShortJournal {
         if self.can_add_entry(&le) {
             self.entry = le.clone();
             match le.operation {
+                Operation::JournalInit { .. } => { unreachable!("can_add_entry should have caught this invalid case (bulk add cannot be a non-first entry)")}
                 Operation::DeviceAdd { subject, .. } => {
                     self.trusted_devices.insert(subject, le);
                 }
