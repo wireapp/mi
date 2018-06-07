@@ -267,6 +267,9 @@ impl Validator {
                 if entry.index != 0 {
                     return Err(ValidatorError::InvalidJournalInit);
                 }
+                if devices.len() < 1 || devices.len() > MAX_DEVICES {
+                    return Err(ValidatorError::InvalidJournalInit);
+                }
                 let subjects: HashSet<PublicKey> =
                     devices.iter().map(|(_, s)| *s).collect();
                 // issuer has to be one of devices that are being added
