@@ -254,43 +254,47 @@ impl Validator {
     }
 
     /// invariants:
-    /// * first entry must be JournalInit
+    /// * the entry must be JournalInit
+    /// * there should be [1..MAX_DEVICES] in total
     /// * issuer has to be one of devices that are being added
     /// * issuer has to be added with capabilities that permit device addition
     /// * the set of devices must not contain any duplicates
-    pub fn validate_first_entry(
+    pub fn validate_journal_init(
         entry: &JournalEntry,
     ) -> Result<(), ValidatorError> {
-        if !entry.verify_signature(&entry.issuer, &entry.signature) {
-            return Err(ValidatorError::IssuerSignatureInvalid);
-        }
         match entry.operation.clone() {
             Operation::JournalInit { devices, .. } => {
+                if entry.index != 0 {
+                    return Err(ValidatorError::InvalidJournalInit);
+                }
                 let subjects: HashSet<PublicKey> =
                     devices.iter().map(|(_, s)| *s).collect();
                 // issuer has to be one of devices that are being added
                 if !subjects.contains(&entry.issuer) {
-                    return Err(ValidatorError::InvalidFirstEntry);
+                    return Err(ValidatorError::InvalidJournalInit);
                 }
                 let issuer_device =
                     devices.iter().find(|(_, s)| *s == entry.issuer);
                 match issuer_device {
-                    None => return Err(ValidatorError::InvalidFirstEntry),
+                    None => return Err(ValidatorError::InvalidJournalInit),
                     // issuer has to be added with capabilities that permit device addition
                     Some((capabilities, _)) => {
                         if !is_permanent(*capabilities) {
-                            return Err(ValidatorError::InvalidFirstEntry);
+                            return Err(ValidatorError::InvalidJournalInit);
                         }
                     }
                 }
                 // the set of devices must not contain any duplicates
                 if subjects.len() != devices.len() {
-                    return Err(ValidatorError::InvalidFirstEntry);
+                    return Err(ValidatorError::InvalidJournalInit);
                 }
-                Ok(())
             }
-            _ => Err(ValidatorError::InvalidFirstEntry),
+            _ => return Err(ValidatorError::InvalidOperation),
         }
+        if !entry.verify_signature(&entry.issuer, &entry.signature) {
+            return Err(ValidatorError::IssuerSignatureInvalid);
+        }
+        Ok(())
     }
 
     pub fn validate_journal(
@@ -344,9 +348,7 @@ pub enum ValidatorError {
     SubjectNotRemovable,
     /// *Addition:* There can be at most `device_limit` trusted devices at
     /// any time, and this limit has been exceeded.
-    TooManyTrustedDevices {
-        device_limit: usize,
-    },
+    TooManyTrustedDevices { device_limit: usize },
     /// *Removal:* The last trusted device cannot be removed from the journal.
     TooFewTrustedDevices,
     /// *All operations:* The issuer's signature is not valid.
@@ -355,9 +357,11 @@ pub enum ValidatorError {
     SubjectSignatureInvalid,
     /// *Self-update:* The issuer is not allowed to self-update.
     IssuerCannotSelfUpdate,
-    /// *All operations:* Invalid operation.
+    /// *All operations:* Invalid operation (e.g. `JournalInit` is not the
+    /// first entry, or the first entry is not `JournalInit`)
     InvalidOperation,
-    InvalidFirstEntry,
+    /// *Journal init:* something is wrong.
+    InvalidJournalInit,
 }
 
 impl fmt::Display for ValidatorError {
@@ -382,7 +386,7 @@ impl fmt::Display for ValidatorError {
             ValidatorError::SubjectSignatureInvalid => write!(f, "The subject's signature is not valid."),
             ValidatorError::IssuerCannotSelfUpdate => write!(f, "The issuer is not allowed to self-update."),
             ValidatorError::InvalidOperation => write!(f, "Invalid operation."),
-            ValidatorError::InvalidFirstEntry => write!(f, "The first entry of a journal must be JournalInit"),
+            ValidatorError::InvalidJournalInit => write!(f, "Something is wrong about JournalInit."),
         }
     }
 }

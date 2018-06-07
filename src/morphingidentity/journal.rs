@@ -75,7 +75,7 @@ impl FullJournal {
     pub fn new_from_entry(
         entry: JournalEntry,
     ) -> Result<FullJournal, ValidatorError> {
-        Validator::validate_first_entry(&entry)?;
+        Validator::validate_journal_init(&entry)?;
         let mut new_journal: FullJournal = FullJournal {
             journal_id: entry.journal_id,
             entries: Vec::new(),
