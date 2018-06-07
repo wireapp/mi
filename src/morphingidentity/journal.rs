@@ -58,7 +58,7 @@ impl FullJournal {
         issuer_sk: &SecretKey,
         devices: Vec<(u32, PublicKey)>,
     ) -> Result<FullJournal, ValidatorError> {
-        let initial_operation = Operation::DeviceBulkAdd { devices };
+        let initial_operation = Operation::JournalInit { devices };
         let mut entry = JournalEntry::new(
             _journal_id,
             hash(&[]),
@@ -121,7 +121,7 @@ impl FullJournal {
         self.entries.push(entry.clone());
         self.hash = entry.hash();
         match entry.operation.clone() {
-            Operation::DeviceBulkAdd { devices } => {
+            Operation::JournalInit { devices } => {
                 for (capabilities, subject) in devices.iter() {
                     self.trusted_devices.insert(
                         *subject,
@@ -289,7 +289,7 @@ impl FullJournal {
         for i in 0..start + 1 {
             let l = &self.entries[start - i];
             match l.operation.clone() {
-                Operation::DeviceBulkAdd { devices } => {
+                Operation::JournalInit { devices } => {
                     for (_, subject) in devices.iter() {
                         if *subject == entry.issuer {
                             return Some(l);

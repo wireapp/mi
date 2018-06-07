@@ -39,7 +39,7 @@ impl Validator {
             return Err(ValidatorError::IssuerSignatureInvalid);
         }
         match entry.operation {
-            Operation::DeviceBulkAdd { .. } => {
+            Operation::JournalInit { .. } => {
                 Err(ValidatorError::InvalidOperation)
             }
             Operation::DeviceAdd { .. } => {
@@ -254,7 +254,7 @@ impl Validator {
     }
 
     /// invariants:
-    /// * first entry must be DeviceBulkAdd
+    /// * first entry must be JournalInit
     /// * issuer has to be one of devices that are being added
     /// * issuer has to be added with capabilities that permit device addition
     /// * the set of devices must not contain any duplicates
@@ -265,7 +265,7 @@ impl Validator {
             return Err(ValidatorError::IssuerSignatureInvalid);
         }
         match entry.operation.clone() {
-            Operation::DeviceBulkAdd { devices, .. } => {
+            Operation::JournalInit { devices, .. } => {
                 let subjects: HashSet<PublicKey> =
                     devices.iter().map(|(_, s)| *s).collect();
                 // issuer has to be one of devices that are being added
@@ -382,7 +382,7 @@ impl fmt::Display for ValidatorError {
             ValidatorError::SubjectSignatureInvalid => write!(f, "The subject's signature is not valid."),
             ValidatorError::IssuerCannotSelfUpdate => write!(f, "The issuer is not allowed to self-update."),
             ValidatorError::InvalidOperation => write!(f, "Invalid operation."),
-            ValidatorError::InvalidFirstEntry => write!(f, "The first entry of a journal must be DeviceBulkAdd"),
+            ValidatorError::InvalidFirstEntry => write!(f, "The first entry of a journal must be JournalInit"),
         }
     }
 }

@@ -5,9 +5,11 @@ use std::io::{Read, Write};
 /// Specific operation done by an entry.
 #[derive(PartialEq, Clone, Debug)]
 pub enum Operation {
-    DeviceBulkAdd {
-        // TODO BulkAdd with an empty vector should never be allowed. non_empty crate?
+    JournalInit {
+        /// Devices that should be present in the journal, along with their
+        /// capabilities.
         devices: Vec<(u32, PublicKey)>,
+        // TODO JournalInit with an empty vector should never be allowed. non_empty crate?
         //TODO: create a new type later
         // TODO: newtype u32 capabilities
     },
@@ -67,7 +69,7 @@ pub const TAG_DEVICE_SELF_REPLACE: u32 = 4;
 impl Operation {
     pub fn set_subject_signature(&mut self, signature: Signature) {
         match *self {
-            Operation::DeviceBulkAdd { .. } => {}
+            Operation::JournalInit { .. } => {}
             Operation::DeviceAdd {
                 ref mut subject_signature,
                 ..
@@ -92,7 +94,7 @@ impl Operation {
 
     pub fn encode<W: Write>(&self, e: &mut Encoder<W>) -> EncodeResult {
         match *self {
-            Operation::DeviceBulkAdd { ref devices } => {
+            Operation::JournalInit { ref devices } => {
                 e.array(2)?;
                 e.u32(TAG_DEVICE_BULK_ADD)?;
                 e.array(devices.len())?;
@@ -154,20 +156,20 @@ impl Operation {
         let tag = d.u32()?;
         match tag {
             TAG_DEVICE_BULK_ADD => {
-                check_array_length("Operation::DeviceBulkAdd", 2, len)?;
+                check_array_length("Operation::JournalInit", 2, len)?;
                 let length = d.array()?;
                 let mut devices = Vec::new();
                 for _ in 0..length {
                     ensure_array_length(
                         d,
-                        "Operation::DeviceBulkAdd::(u32,PublicKey)",
+                        "Operation::JournalInit::(u32,PublicKey)",
                         2,
                     )?;
                     let cap = d.u32()?;
                     let subject = decode_publickey(d)?;
                     devices.push((cap, subject));
                 }
-                Ok(Operation::DeviceBulkAdd { devices })
+                Ok(Operation::JournalInit { devices })
             }
             TAG_DEVICE_ADD => {
                 check_array_length("Operation::DeviceAdd", 4, len)?;

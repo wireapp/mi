@@ -340,7 +340,7 @@ mod tests {
                     let cap: u32 = GoodRand::rand();
                     devices.push((cap, sub));
                 }
-                Operation::DeviceBulkAdd { devices }
+                Operation::JournalInit { devices }
             }
             TAG_DEVICE_ADD => Operation::DeviceAdd {
                 capabilities: GoodRand::rand(),
