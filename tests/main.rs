@@ -198,7 +198,7 @@ fn fuzz_testing() {
     let mut pub_keys = Vec::new();
 
     // Create a pool of devices we can add and remove
-    for _i in 0..DEVICES {
+    for _ in 0..DEVICES {
         let (p_key, s_key) = sign::gen_keypair();
         sec_keys.push(s_key);
         pub_keys.push(p_key);
@@ -212,7 +212,7 @@ fn fuzz_testing() {
         devices,
     ).unwrap();
 
-    for _i in 0..ITER - 1 {
+    for _ in 0..ITER - 1 {
         let trusted = random_journal.get_trusted_devices().clone();
         let mut issuer;
         let mut counter;

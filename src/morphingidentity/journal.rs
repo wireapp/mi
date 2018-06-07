@@ -276,8 +276,8 @@ impl FullJournal {
         self.hash
     }
 
-    /// Find the entry that added the given device to the journal.
-    // TODO: only used in tests; move to tests!
+    /// Find the entry that added the signer of the given entry to the
+    /// journal.
     pub fn get_parent(
         &self,
         entry: &JournalEntry,
