@@ -290,32 +290,53 @@ impl Validator {
         match entry.operation.clone() {
             Operation::JournalInit { devices, .. } => {
                 if entry.index != 0 {
-                    return Err(ValidatorError::InvalidJournalInit);
+                    return Err(ValidatorError::InvalidJournalInit {
+                        error: "entry.index != 0",
+                    });
                 }
-                if devices.len() < 1 || devices.len() > MAX_DEVICES as usize
-                {
-                    return Err(ValidatorError::InvalidJournalInit);
+                if devices.len() < 1 {
+                    return Err(ValidatorError::InvalidJournalInit {
+                        error: "devices.len < 1",
+                    });
+                }
+                if devices.len() > MAX_DEVICES as usize {
+                    return Err(ValidatorError::InvalidJournalInit {
+                        error: "devices.len > MAX_DEVICES",
+                    });
                 }
                 let subjects: HashSet<PublicKey> =
                     devices.iter().map(|(_, s)| *s).collect();
                 // issuer has to be one of devices that are being added
                 if !subjects.contains(&entry.issuer) {
-                    return Err(ValidatorError::InvalidJournalInit);
+                    return Err(ValidatorError::InvalidJournalInit {
+                        error: "entry.issuer is not in subjects",
+                    });
                 }
                 let issuer_device =
                     devices.iter().find(|(_, s)| *s == entry.issuer);
                 match issuer_device {
-                    None => return Err(ValidatorError::InvalidJournalInit),
+                    None => {
+                        return Err(ValidatorError::InvalidJournalInit {
+                            error: "issuer not found in devices",
+                        })
+                    }
                     // issuer has to be added with capabilities that permit device addition
                     Some((capabilities, _)) => {
-                        if capabilities.is_permanent() {
-                            return Err(ValidatorError::InvalidJournalInit);
+                        if !capabilities.is_permanent() {
+                            return Err(
+                                ValidatorError::InvalidJournalInit {
+                                    error:
+                                        "issuer's device isn't permanent",
+                                },
+                            );
                         }
                     }
                 }
                 // the set of devices must not contain any duplicates
                 if subjects.len() != devices.len() {
-                    return Err(ValidatorError::InvalidJournalInit);
+                    return Err(ValidatorError::InvalidJournalInit {
+                        error: "devices contain duplicates",
+                    });
                 }
             }
             _ => return Err(ValidatorError::InvalidOperation),
@@ -390,7 +411,7 @@ pub enum ValidatorError {
     /// first entry, or the first entry is not `JournalInit`)
     InvalidOperation,
     /// *Journal init:* something is wrong.
-    InvalidJournalInit,
+    InvalidJournalInit { error: &'static str },
 }
 
 impl fmt::Display for ValidatorError {
@@ -415,7 +436,7 @@ impl fmt::Display for ValidatorError {
             ValidatorError::SubjectSignatureInvalid => write!(f, "The subject's signature is not valid."),
             ValidatorError::IssuerCannotSelfUpdate => write!(f, "The issuer is not allowed to self-update."),
             ValidatorError::InvalidOperation => write!(f, "Invalid operation."),
-            ValidatorError::InvalidJournalInit => write!(f, "Something is wrong about JournalInit."),
+            ValidatorError::InvalidJournalInit { error } => write!(f, "Something is wrong about JournalInit: {}", error),
         }
     }
 }
