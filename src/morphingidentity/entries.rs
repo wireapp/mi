@@ -294,7 +294,7 @@ mod tests {
                 let bound = randomnumber(16);
                 for _ in 0..=bound {
                     let sub: PublicKey = GoodRand::rand();
-                    let cap: u32 = GoodRand::rand();
+                    let cap: Capabilities = GoodRand::rand();
                     devices.push((cap, sub));
                 }
                 Operation::JournalInit { devices }

@@ -39,3 +39,9 @@ pub enum DeviceType {
         | CapType::RemoveCap as u32
         | CapType::SelfUpdateCap as u32,
 }
+
+impl From<DeviceType> for Capabilities {
+    fn from(n: DeviceType) -> Capabilities {
+        Capabilities(n as u32)
+    }
+}
