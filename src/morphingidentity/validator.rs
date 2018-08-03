@@ -1,37 +1,66 @@
-use entries::{is_permanent, JournalEntry};
+use capabilities::*;
+use entries::JournalEntry;
 use journal::*;
 use operation::*;
+use sodiumoxide::crypto::hash::sha256::Digest;
 use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 
+/// Interface that a journal-like structure has to implement so that an entry
+/// can be validated against it.
+pub trait ValidateEntry {
+    /// Journal ID
+    fn journal_id(&self) -> JournalID;
+
+    /// Does the journal contain no entries?
+    fn is_empty(&self) -> bool;
+
+    /// Index of the last entry
+    fn last_index(&self) -> u32;
+
+    /// Hash of the last entry
+    fn last_hash(&self) -> Digest;
+
+    /// Number of devices in the journal
+    fn trusted_devices_count(&self) -> u32;
+
+    /// Check if given device is in the set of trusted devices
+    fn is_device_trusted(&self, &PublicKey) -> bool;
+
+    /// Capabilities of given device
+    fn device_capabilities(&self, &PublicKey) -> Option<Capabilities>;
+}
+
+/// Use methods of `Validator` to validate entries.
+///
+/// TODO: why do we have methods instead of functions?
 pub struct Validator {}
 
 impl Validator {
-    pub fn validate_entry(
-        journal: &FullJournal,
+    pub fn validate_entry<J: ValidateEntry>(
+        journal: &J,
         entry: &JournalEntry,
     ) -> Result<(), ValidatorError> {
         // There needs to be at least 1 entry in the journal
-        if journal.get_entries().is_empty() {
+        if journal.is_empty() {
             return Err(ValidatorError::EmptyJournal);
         }
-        let last_entry = journal.get_entries().last().unwrap();
         // The journal cannot be full
-        if last_entry.index == u32::max_value() {
+        if journal.last_index() == u32::max_value() {
             return Err(ValidatorError::FullJournal);
         }
         // The entry journal ID needs to match the journal ID of the journal
-        if entry.journal_id != journal.get_journal_id() {
+        if entry.journal_id != journal.journal_id() {
             return Err(ValidatorError::JournalIdMismatch);
         }
         // The index of the entry needs to match the next index of the journal
-        if entry.index != (last_entry.index + 1) {
+        if entry.index != (journal.last_index() + 1) {
             return Err(ValidatorError::IndexMismatch);
         }
         // The history hash of the entry needs to match the hash of the journal
-        if last_entry.hash()[..] != entry.history_hash[..] {
+        if journal.last_hash()[..] != entry.history_hash[..] {
             return Err(ValidatorError::HashMismatch);
         }
         // Issuer signature needs to be valid
@@ -57,8 +86,8 @@ impl Validator {
         }
     }
 
-    pub fn validate_unsigned_subject_entry(
-        journal: &FullJournal,
+    pub fn validate_unsigned_subject_entry<J: ValidateEntry>(
+        journal: &J,
         entry: &JournalEntry,
     ) -> Result<(), ValidatorError> {
         match Self::validate_entry(journal, entry) {
@@ -70,8 +99,8 @@ impl Validator {
         }
     }
 
-    fn validate_device_add(
-        journal: &FullJournal,
+    fn validate_device_add<J: ValidateEntry>(
+        journal: &J,
         entry: &JournalEntry,
     ) -> Result<(), ValidatorError> {
         match entry.operation {
@@ -80,17 +109,16 @@ impl Validator {
                 subject_signature,
                 ..
             } => {
-                let trusted_devices = journal.get_trusted_devices();
                 // There needs to be an available slot for a new trusted device
-                if trusted_devices.len() >= MAX_DEVICES {
+                if journal.trusted_devices_count() >= MAX_DEVICES {
                     return Err(ValidatorError::TooManyTrustedDevices {
                         device_limit: MAX_DEVICES,
                     });
                 }
-                match journal.get_trusted_device(&entry.issuer) {
-                    Some(device) => {
+                match journal.device_capabilities(&entry.issuer) {
+                    Some(cap) => {
                         // Issuer device needs to have the capability to add other devices
-                        if !device.capability_can_add() {
+                        if !cap.can_add() {
                             return Err(ValidatorError::IssuerCannotAdd);
                         }
                     }
@@ -100,7 +128,7 @@ impl Validator {
                     }
                 };
                 // Subject device needs to be new to the journal
-                if trusted_devices.contains_key(&subject) {
+                if journal.is_device_trusted(&subject) {
                     return Err(ValidatorError::SubjectAlreadyExists);
                 }
                 // Subject sugnature needs to be valid
@@ -113,21 +141,20 @@ impl Validator {
         }
     }
 
-    fn validate_device_remove(
-        journal: &FullJournal,
+    fn validate_device_remove<J: ValidateEntry>(
+        journal: &J,
         entry: &JournalEntry,
     ) -> Result<(), ValidatorError> {
         match entry.operation {
             Operation::DeviceRemove { subject, .. } => {
-                let trusted_devices = journal.get_trusted_devices();
-                // There needs to be at least one device left in the journal
-                if trusted_devices.len() <= 1 {
+                // There needs to be at least one device left in the journal after the removal
+                if journal.trusted_devices_count() <= 1 {
                     return Err(ValidatorError::TooFewTrustedDevices);
                 }
-                match journal.get_trusted_device(&entry.issuer) {
-                    Some(device) => {
+                match journal.device_capabilities(&entry.issuer) {
+                    Some(cap) => {
                         // Issuer device needs to have the capability to remove other devices
-                        if !device.capability_can_remove() {
+                        if !cap.can_remove() {
                             return Err(ValidatorError::IssuerCannotRemove);
                         }
                     }
@@ -136,9 +163,9 @@ impl Validator {
                         return Err(ValidatorError::IssuerNotFound);
                     }
                 };
-                match journal.get_trusted_device(&subject) {
-                    Some(device) => {
-                        if device.capability_cannot_be_removed() {
+                match journal.device_capabilities(&subject) {
+                    Some(cap) => {
+                        if cap.cannot_be_removed() {
                             // Subject needs to be removable
                             return Err(ValidatorError::SubjectNotRemovable);
                         }
@@ -154,8 +181,8 @@ impl Validator {
         }
     }
 
-    fn validate_device_replace(
-        journal: &FullJournal,
+    fn validate_device_replace<J: ValidateEntry>(
+        journal: &J,
         entry: &JournalEntry,
     ) -> Result<(), ValidatorError> {
         match entry.operation {
@@ -165,15 +192,14 @@ impl Validator {
                 added_subject_signature,
                 ..
             } => {
-                let trusted_devices = journal.get_trusted_devices();
-                match journal.get_trusted_device(&entry.issuer) {
-                    Some(device) => {
+                match journal.device_capabilities(&entry.issuer) {
+                    Some(cap) => {
                         // Issuer device needs to have the capability to remove other devices
-                        if !device.capability_can_remove() {
+                        if !cap.can_remove() {
                             return Err(ValidatorError::IssuerCannotRemove);
                         }
                         // Issuer device needs to have the capability to add other devices
-                        if !device.capability_can_add() {
+                        if !cap.can_add() {
                             return Err(ValidatorError::IssuerCannotAdd);
                         }
                     }
@@ -183,9 +209,9 @@ impl Validator {
                     }
                 };
                 // Removed subject needs to be removable
-                match journal.get_trusted_device(&removed_subject) {
-                    Some(device) => {
-                        if device.capability_cannot_be_removed() {
+                match journal.device_capabilities(&removed_subject) {
+                    Some(cap) => {
+                        if cap.cannot_be_removed() {
                             return Err(ValidatorError::SubjectNotRemovable);
                         }
                     }
@@ -195,7 +221,7 @@ impl Validator {
                     }
                 };
                 // Added subject device needs to be new to the journal
-                if trusted_devices.contains_key(&added_subject) {
+                if journal.is_device_trusted(&added_subject) {
                     return Err(ValidatorError::SubjectAlreadyExists);
                 }
                 // Added subject signature needs to be valid
@@ -211,8 +237,8 @@ impl Validator {
         }
     }
 
-    fn validate_device_self_replace(
-        journal: &FullJournal,
+    fn validate_device_self_replace<J: ValidateEntry>(
+        journal: &J,
         entry: &JournalEntry,
     ) -> Result<(), ValidatorError> {
         match entry.operation {
@@ -221,11 +247,10 @@ impl Validator {
                 added_subject_signature,
                 ..
             } => {
-                let trusted_devices = journal.get_trusted_devices();
-                match journal.get_trusted_device(&entry.issuer) {
-                    Some(device) => {
+                match journal.device_capabilities(&entry.issuer) {
+                    Some(cap) => {
                         // Issuer needs to have the self-update capability
-                        if !device.capability_can_self_update() {
+                        if !cap.can_self_update() {
                             return Err(
                                 ValidatorError::IssuerCannotSelfUpdate,
                             );
@@ -237,7 +262,7 @@ impl Validator {
                     }
                 };
                 // Added subject device needs to be new to the journal
-                if trusted_devices.contains_key(&added_subject) {
+                if journal.is_device_trusted(&added_subject) {
                     return Err(ValidatorError::SubjectAlreadyExists);
                 }
                 // Added subject signature needs to be valid
@@ -267,7 +292,8 @@ impl Validator {
                 if entry.index != 0 {
                     return Err(ValidatorError::InvalidJournalInit);
                 }
-                if devices.len() < 1 || devices.len() > MAX_DEVICES {
+                if devices.len() < 1 || devices.len() > MAX_DEVICES as usize
+                {
                     return Err(ValidatorError::InvalidJournalInit);
                 }
                 let subjects: HashSet<PublicKey> =
@@ -282,7 +308,7 @@ impl Validator {
                     None => return Err(ValidatorError::InvalidJournalInit),
                     // issuer has to be added with capabilities that permit device addition
                     Some((capabilities, _)) => {
-                        if !is_permanent(*capabilities) {
+                        if capabilities.is_permanent() {
                             return Err(ValidatorError::InvalidJournalInit);
                         }
                     }
@@ -351,7 +377,7 @@ pub enum ValidatorError {
     SubjectNotRemovable,
     /// *Addition:* There can be at most `device_limit` trusted devices at
     /// any time, and this limit has been exceeded.
-    TooManyTrustedDevices { device_limit: usize },
+    TooManyTrustedDevices { device_limit: u32 },
     /// *Removal:* The last trusted device cannot be removed from the journal.
     TooFewTrustedDevices,
     /// *All operations:* The issuer's signature is not valid.

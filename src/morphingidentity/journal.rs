@@ -1,3 +1,4 @@
+use capabilities::*;
 use cbor::{DecodeError, DecodeResult};
 use cbor_utils::{
     ensure_array_length, run_decoder_full, run_encoder, MIDecodeError,
@@ -8,10 +9,10 @@ use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
 use uuid::{ParseError, Uuid};
-use validator::{Validator, ValidatorError};
+use validator::{ValidateEntry, Validator, ValidatorError};
 
 pub const FORMAT_JOURNAL_VERSION: u32 = 0;
-pub const MAX_DEVICES: usize = 8;
+pub const MAX_DEVICES: u32 = 8;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]
 pub struct UserID(pub u32);
@@ -51,12 +52,39 @@ pub struct FullJournal {
     trusted_devices: HashMap<PublicKey, DeviceInfo>,
 }
 
+impl ValidateEntry for FullJournal {
+    fn journal_id(&self) -> JournalID {
+        self.journal_id
+    }
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+    fn last_index(&self) -> u32 {
+        self.entries.last().unwrap().index
+    }
+    fn last_hash(&self) -> Digest {
+        self.entries.last().unwrap().hash()
+    }
+    fn trusted_devices_count(&self) -> u32 {
+        self.trusted_devices.len() as u32
+    }
+    fn is_device_trusted(&self, device: &PublicKey) -> bool {
+        self.trusted_devices.contains_key(device)
+    }
+    fn device_capabilities(
+        &self,
+        device: &PublicKey,
+    ) -> Option<Capabilities> {
+        self.trusted_devices.get(device).map(|x| x.capabilities)
+    }
+}
+
 impl FullJournal {
     pub fn new(
         _journal_id: JournalID,
         issuer_pk: &PublicKey,
         issuer_sk: &SecretKey,
-        devices: Vec<(u32, PublicKey)>,
+        devices: Vec<(Capabilities, PublicKey)>,
     ) -> Result<FullJournal, ValidatorError> {
         let initial_operation = Operation::JournalInit { devices };
         let mut entry = JournalEntry::new(
@@ -104,7 +132,9 @@ impl FullJournal {
             *issuer_pk,
         );
         entry.signature = entry.sign(issuer_sk);
-        Validator::validate_unsigned_subject_entry(&self, &entry)?;
+        Validator::validate_unsigned_subject_entry::<FullJournal>(
+            &self, &entry,
+        )?;
         Ok(entry)
     }
 
@@ -113,7 +143,7 @@ impl FullJournal {
         &self,
         entry: &JournalEntry,
     ) -> Result<(), ValidatorError> {
-        Validator::validate_entry(&self, entry)
+        Validator::validate_entry::<FullJournal>(&self, entry)
     }
 
     /// Add an entry to the journal without validating it.

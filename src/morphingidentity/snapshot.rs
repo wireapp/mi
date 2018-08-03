@@ -10,6 +10,8 @@ use sodiumoxide::crypto::hash::sha256::Digest;
 ///
 ///   * and the journal hasn't been corrupted or altered.
 ///
+/// However, a snapshot doesn't contain any entries and it's impossible to
+/// validate an entry against a snapshot.
 pub struct Snapshot {
     /// Journal ID
     pub journal_id: u32,
@@ -20,7 +22,8 @@ pub struct Snapshot {
     pub advanced_hash: Digest,
 }
 
-/// The Distribution Tag is included in the Proteus message envelope to force journal updates on the receiving end.
+/// The Distribution Tag is included in the Proteus message envelope to
+/// force journal updates on the receiving end.
 pub struct DistributionTag {
     pub journal_snapshot: Snapshot,
 }

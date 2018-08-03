@@ -1,3 +1,4 @@
+use capabilities::*;
 use cbor::{DecodeResult, Decoder, EncodeResult, Encoder};
 use sodiumoxide::crypto::sign::*;
 use std::io::{Read, Write};
@@ -8,16 +9,15 @@ pub enum Operation {
     JournalInit {
         /// Devices that should be present in the journal, along with their
         /// capabilities.
-        devices: Vec<(u32, PublicKey)>,
+        devices: Vec<(Capabilities, PublicKey)>,
         // TODO JournalInit with an empty vector should never be allowed. non_empty crate?
         //TODO: create a new type later
-        // TODO: newtype u32 capabilities
     },
 
     /// Add a new device to the journal.
     DeviceAdd {
         /// Capabilities of the newly added device.
-        capabilities: u32,
+        capabilities: Capabilities,
         /// Public key of the device that is being added.
         subject: PublicKey,
         /// A signature by the device.
@@ -35,7 +35,7 @@ pub enum Operation {
         /// Public key of the device that is being removed.
         removed_subject: PublicKey,
         /// Capabilities of the newly added device.
-        capabilities: u32,
+        capabilities: Capabilities,
         /// Public key of the device that is being added.
         added_subject: PublicKey,
         /// A signature by the device.
@@ -100,7 +100,7 @@ impl Operation {
                 e.array(devices.len())?;
                 for (capabilities, subject) in devices.iter() {
                     e.array(2)?;
-                    e.u32(*capabilities)?;
+                    e.u32(capabilities.0)?;
                     e.bytes(&subject[..])?;
                 }
                 Ok(())
@@ -112,7 +112,7 @@ impl Operation {
             } => {
                 e.array(4)?;
                 e.u32(TAG_DEVICE_ADD)?;
-                e.u32(capabilities)?;
+                e.u32(capabilities.0)?;
                 e.bytes(&subject[..])?;
                 e.bytes(&subject_signature[..])?;
                 Ok(())
@@ -132,7 +132,7 @@ impl Operation {
                 e.array(5)?;
                 e.u32(TAG_DEVICE_REPLACE)?;
                 e.bytes(&removed_subject[..])?;
-                e.u32(capabilities)?;
+                e.u32(capabilities.0)?;
                 e.bytes(&added_subject[..])?;
                 e.bytes(&added_subject_signature[..])?;
                 Ok(())
@@ -162,10 +162,10 @@ impl Operation {
                 for _ in 0..length {
                     ensure_array_length(
                         d,
-                        "Operation::JournalInit::(u32,PublicKey)",
+                        "Operation::JournalInit::(Capabilities,PublicKey)",
                         2,
                     )?;
-                    let cap = d.u32()?;
+                    let cap = Capabilities(d.u32()?);
                     let subject = decode_publickey(d)?;
                     devices.push((cap, subject));
                 }
@@ -174,7 +174,7 @@ impl Operation {
             TAG_DEVICE_ADD => {
                 check_array_length("Operation::DeviceAdd", 4, len)?;
                 Ok(Operation::DeviceAdd {
-                    capabilities: d.u32()?,
+                    capabilities: Capabilities(d.u32()?),
                     subject: decode_publickey(d)?,
                     subject_signature: decode_signature(d)?,
                 })
@@ -189,7 +189,7 @@ impl Operation {
                 check_array_length("Operation::DeviceReplace", 5, len)?;
                 Ok(Operation::DeviceReplace {
                     removed_subject: decode_publickey(d)?,
-                    capabilities: d.u32()?,
+                    capabilities: Capabilities(d.u32()?),
                     added_subject: decode_publickey(d)?,
                     added_subject_signature: decode_signature(d)?,
                 })

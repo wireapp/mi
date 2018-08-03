@@ -5,12 +5,20 @@ use sodiumoxide::crypto::hash::sha256::Digest;
 use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashMap;
 
+/// A short journal is what you arrive at when you process a journal. You
+/// can validate an entry against a short journal, but you can't check that
+/// a particular short journal belongs to the given user and hasn't been
+/// tampered with.
 pub struct ShortJournal {
-    version: u32,
-    journal_id: JournalID,
-    hash: Digest,
-    entry: JournalEntry,
-    trusted_devices: HashMap<PublicKey, JournalEntry>,
+    pub version: u32,
+    /// Journal ID
+    pub journal_id: JournalID,
+    pub hash: Digest,
+    /// The last entry in the journal
+    pub entry: JournalEntry,
+    /// The set of devices currently trusted by the journal, along with
+    /// entries that were used to add those devices
+    pub trusted_devices: HashMap<PublicKey, JournalEntry>,
 }
 
 /// TODO: Review the checks (and simplify by merging with other checks)
@@ -19,7 +27,7 @@ pub struct ShortJournal {
 impl ShortJournal {
     pub fn new() {}
     pub fn can_add_entry(&self, le: &JournalEntry) -> bool {
-        if self.trusted_devices.len() >= MAX_DEVICES
+        if self.trusted_devices.len() >= MAX_DEVICES as usize
             || self.version >= (u32::max_value() - 1)
             || le.journal_id != self.journal_id
             || self.entry.hash()[..] == le.history_hash[..]
