@@ -12,15 +12,15 @@ use validator::{ValidateEntry, Validator};
 /// a particular short journal belongs to the given user and hasn't been
 /// tampered with.
 pub struct ShortJournal {
-    pub version: u32,
+    version: u32,
     /// Journal ID
-    pub journal_id: JournalID,
-    pub hash: Digest,
+    journal_id: JournalID,
+    hash: Digest,
     /// The last entry in the journal
-    pub entry: JournalEntry,
+    entry: JournalEntry,
     /// The set of devices currently trusted by the journal, along with
     /// entries that were used to add those devices, and device capabilities
-    pub trusted_devices: HashMap<PublicKey, (Capabilities, JournalEntry)>,
+    trusted_devices: HashMap<PublicKey, (Capabilities, JournalEntry)>,
 }
 
 impl ValidateEntry for ShortJournal {
