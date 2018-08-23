@@ -6,6 +6,7 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature};
 use std::io::{Read, Write};
 
+use capabilities::*;
 use cbor_utils::{run_decoder_full, run_encoder};
 use journal::{FullJournal, JournalID};
 use operation::*;
@@ -13,59 +14,15 @@ use utils::EMPTYSIGNATURE;
 
 pub const FORMAT_ENTRY_VERSION: u32 = 0;
 
-#[repr(u32)]
-#[cfg_attr(rustfmt, rustfmt_skip)]
-pub enum CapType {
-    AddCap          = 0b0001u32,
-    RemoveCap       = 0b0010u32,
-    NonRemovableCap = 0b0100u32,
-    SelfUpdateCap   = 0b1000u32,
-}
-#[repr(u32)]
-pub enum DeviceType {
-    TemporaryDevice = 0u32,
-    PermanentDevice = CapType::AddCap as u32
-        | CapType::RemoveCap as u32
-        | CapType::SelfUpdateCap as u32,
-}
-
-pub fn is_permanent(capabilities: u32) -> bool {
-    capabilities & DeviceType::PermanentDevice as u32
-        == DeviceType::PermanentDevice as u32
-}
-
-pub fn is_temporary(capabilities: u32) -> bool {
-    capabilities == DeviceType::TemporaryDevice as u32
-}
-
 /// Information about a trusted device.
 #[derive(PartialEq, Clone, Debug)]
 pub struct DeviceInfo {
     /// Public key of the device.
     pub key: PublicKey,
     /// Capabilities of the device.
-    pub capabilities: u32,
+    pub capabilities: Capabilities,
     /// Journal entry which was used to add the device.
     pub entry: JournalEntry,
-}
-
-impl DeviceInfo {
-    /// Can the device authorize addition of other devices?
-    pub fn capability_can_add(&self) -> bool {
-        (self.capabilities & CapType::AddCap as u32) > 0
-    }
-    /// Can the device authorize removal of other devices?
-    pub fn capability_can_remove(&self) -> bool {
-        (self.capabilities & CapType::RemoveCap as u32) > 0
-    }
-    /// Is it true that the device can not be removed from the journal?
-    pub fn capability_cannot_be_removed(&self) -> bool {
-        (self.capabilities & CapType::NonRemovableCap as u32) > 0
-    }
-    /// Can the device self-update?
-    pub fn capability_can_self_update(&self) -> bool {
-        (self.capabilities & CapType::SelfUpdateCap as u32) > 0
-    }
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -337,7 +294,7 @@ mod tests {
                 let bound = randomnumber(16);
                 for _ in 0..=bound {
                     let sub: PublicKey = GoodRand::rand();
-                    let cap: u32 = GoodRand::rand();
+                    let cap: Capabilities = GoodRand::rand();
                     devices.push((cap, sub));
                 }
                 Operation::JournalInit { devices }

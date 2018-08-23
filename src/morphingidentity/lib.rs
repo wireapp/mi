@@ -1,5 +1,6 @@
 #[macro_use]
 pub mod cbor_utils;
+pub mod capabilities;
 pub mod entries;
 pub mod journal;
 pub mod operation;

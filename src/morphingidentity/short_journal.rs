@@ -1,16 +1,53 @@
+use capabilities::*;
 use entries::JournalEntry;
 use journal::*;
 use operation::Operation;
 use sodiumoxide::crypto::hash::sha256::Digest;
 use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashMap;
+use validator::{ValidateEntry, Validator};
 
+/// A short journal is what you arrive at when you process a journal. You
+/// can validate an entry against a short journal, but you can't check that
+/// a particular short journal belongs to the given user and hasn't been
+/// tampered with.
 pub struct ShortJournal {
     version: u32,
+    /// Journal ID
     journal_id: JournalID,
     hash: Digest,
+    /// The last entry in the journal
     entry: JournalEntry,
-    trusted_devices: HashMap<PublicKey, JournalEntry>,
+    /// The set of devices currently trusted by the journal, along with
+    /// entries that were used to add those devices, and device capabilities
+    trusted_devices: HashMap<PublicKey, (Capabilities, JournalEntry)>,
+}
+
+impl ValidateEntry for ShortJournal {
+    fn journal_id(&self) -> JournalID {
+        self.journal_id
+    }
+    fn is_empty(&self) -> bool {
+        false
+    }
+    fn last_index(&self) -> u32 {
+        self.entry.index
+    }
+    fn last_hash(&self) -> Digest {
+        self.entry.hash()
+    }
+    fn trusted_devices_count(&self) -> u32 {
+        self.trusted_devices.len() as u32
+    }
+    fn is_device_trusted(&self, device: &PublicKey) -> bool {
+        self.trusted_devices.contains_key(device)
+    }
+    fn device_capabilities(
+        &self,
+        device: &PublicKey,
+    ) -> Option<Capabilities> {
+        self.trusted_devices.get(device).map(|x| x.0)
+    }
 }
 
 /// TODO: Review the checks (and simplify by merging with other checks)
@@ -19,64 +56,7 @@ pub struct ShortJournal {
 impl ShortJournal {
     pub fn new() {}
     pub fn can_add_entry(&self, le: &JournalEntry) -> bool {
-        if self.trusted_devices.len() >= MAX_DEVICES
-            || self.version >= (u32::max_value() - 1)
-            || le.journal_id != self.journal_id
-            || self.entry.hash()[..] == le.history_hash[..]
-            || le.index != (self.version + 1)
-        {
-            return false;
-        }
-        match le.operation.clone() {
-            // TODO code duplication, see TODOs above.
-            Operation::JournalInit { .. } => {
-                false // we assume that the journal has already been initialized
-            }
-            Operation::DeviceAdd {
-                subject,
-                subject_signature,
-                ..
-            } => {
-                self.trusted_devices.contains_key(&le.issuer)
-                    && !self.trusted_devices.contains_key(&subject)
-                    && le.verify_signature(&le.issuer, &le.signature)
-                    && le.verify_signature(&subject, &subject_signature)
-            }
-            Operation::DeviceRemove { subject, .. } => {
-                self.trusted_devices.contains_key(&le.issuer)
-                    && self.trusted_devices.contains_key(&subject)
-                    && le.verify_signature(&le.issuer, &le.signature)
-            }
-            Operation::DeviceReplace {
-                removed_subject,
-                added_subject,
-                added_subject_signature,
-                ..
-            } => {
-                self.trusted_devices.contains_key(&removed_subject)
-                    && self.trusted_devices.contains_key(&le.issuer)
-                    && (!self.trusted_devices.contains_key(&added_subject)
-                        || added_subject == removed_subject)
-                    && le.verify_signature(&le.issuer, &le.signature)
-                    && le.verify_signature(
-                        &added_subject,
-                        &added_subject_signature,
-                    )
-            }
-            Operation::DeviceSelfReplace {
-                added_subject,
-                added_subject_signature,
-                ..
-            } => {
-                self.trusted_devices.contains_key(&le.issuer)
-                    && !self.trusted_devices.contains_key(&added_subject)
-                    && le.verify_signature(&le.issuer, &le.signature)
-                    && le.verify_signature(
-                        &added_subject,
-                        &added_subject_signature,
-                    )
-            }
-        }
+        Validator::validate_entry::<ShortJournal>(&self, le).is_ok()
     }
     pub fn get_entry(&self) -> JournalEntry {
         self.entry.clone()
@@ -86,8 +66,8 @@ impl ShortJournal {
             self.entry = le.clone();
             match le.operation {
                 Operation::JournalInit { .. } => { unreachable!("can_add_entry should have caught this invalid case (bulk add cannot be a non-first entry)")}
-                Operation::DeviceAdd { subject, .. } => {
-                    self.trusted_devices.insert(subject, le);
+                Operation::DeviceAdd { subject, capabilities, .. } => {
+                    self.trusted_devices.insert(subject, (capabilities, le));
                 }
                 Operation::DeviceRemove { subject, .. } => {
                     self.trusted_devices.remove(&subject);
@@ -95,14 +75,17 @@ impl ShortJournal {
                 Operation::DeviceReplace {
                     removed_subject,
                     added_subject,
+                    capabilities,
                     ..
                 } => {
                     self.trusted_devices.remove(&removed_subject);
-                    self.trusted_devices.insert(added_subject, le);
+                    self.trusted_devices.insert(added_subject, (capabilities, le));
                 }
                 Operation::DeviceSelfReplace { added_subject, .. } => {
-                    self.trusted_devices.remove(&le.issuer);
-                    self.trusted_devices.insert(added_subject, le);
+                    match self.trusted_devices.remove(&le.issuer) {
+                        None => { unreachable!("can_add_entry should have caught this invalid case (you can't self-replace a device that wasn't trusted)") }
+                        Some((capabilities, _)) => {
+                            self.trusted_devices.insert(added_subject, (capabilities, le)); } }
                 }
             };
             self.hash = self.entry.hash();
@@ -110,9 +93,6 @@ impl ShortJournal {
         }
         drop(le);
         false
-    }
-    pub fn get_trusted(&self) -> HashMap<PublicKey, JournalEntry> {
-        self.trusted_devices.clone()
     }
     pub fn is_device_trusted(&self, device: &PublicKey) -> bool {
         self.trusted_devices.contains_key(device)

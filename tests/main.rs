@@ -3,6 +3,7 @@ extern crate morphingidentity;
 extern crate sodiumoxide;
 extern crate uuid;
 
+use morphingidentity::capabilities::*;
 use morphingidentity::entries::*;
 use morphingidentity::journal::*;
 use morphingidentity::operation::*;
@@ -21,7 +22,7 @@ fn entry_test() {
     let operation = Operation::DeviceAdd {
         subject: subject_pk,
         subject_signature: EMPTYSIGNATURE,
-        capabilities: DeviceType::PermanentDevice as u32,
+        capabilities: Capabilities::from(DeviceType::PermanentDevice),
     };
     let mut je = JournalEntry::new(
         JournalID(Uuid::nil()),
@@ -56,7 +57,8 @@ fn entry_addition_test() {
 
     // Create a new journal with random journal ID and one entry self-signed
     // by Issuer
-    let devices = vec![(DeviceType::PermanentDevice as u32, issuer_pk)];
+    let devices =
+        vec![(Capabilities::from(DeviceType::PermanentDevice), issuer_pk)];
     let mut full_journal =
         FullJournal::new(id, &issuer_pk, &issuer_sk, devices).unwrap();
 
@@ -79,7 +81,7 @@ fn entry_addition_test() {
     let second_operation = Operation::DeviceAdd {
         subject: subject_pk,
         subject_signature: EMPTYSIGNATURE,
-        capabilities: DeviceType::PermanentDevice as u32,
+        capabilities: Capabilities::from(DeviceType::PermanentDevice),
     };
     let mut second_entry = full_journal
         .create_entry(second_operation, &issuer_pk, &issuer_sk)
@@ -204,7 +206,10 @@ fn fuzz_testing() {
         pub_keys.push(p_key);
     }
 
-    let devices = vec![(DeviceType::PermanentDevice as u32, pub_keys[0])];
+    let devices = vec![(
+        Capabilities::from(DeviceType::PermanentDevice),
+        pub_keys[0],
+    )];
     let mut random_journal = FullJournal::new(
         GoodRand::rand(),
         &pub_keys[0],
@@ -263,8 +268,9 @@ fn fuzz_testing() {
                         let next_operation = Operation::DeviceAdd {
                             subject: *subject_public_key,
                             subject_signature: EMPTYSIGNATURE,
-                            capabilities: DeviceType::PermanentDevice
-                                as u32,
+                            capabilities: Capabilities::from(
+                                DeviceType::PermanentDevice,
+                            ),
                         };
 
                         match random_journal.create_entry(
@@ -365,8 +371,9 @@ fn fuzz_testing() {
                             added_subject: *added_subject_public_key,
                             removed_subject: *removed_subject_public_key,
                             added_subject_signature: EMPTYSIGNATURE,
-                            capabilities: DeviceType::PermanentDevice
-                                as u32,
+                            capabilities: Capabilities::from(
+                                DeviceType::PermanentDevice,
+                            ),
                         };
 
                         match random_journal.create_entry(
