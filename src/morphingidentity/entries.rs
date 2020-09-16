@@ -6,11 +6,11 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey, Signature};
 use std::io::{Read, Write};
 
-use capabilities::*;
-use cbor_utils::{run_decoder_full, run_encoder};
-use journal::{FullJournal, JournalID};
-use operation::*;
-use utils::EMPTYSIGNATURE;
+use crate::capabilities::*;
+use crate::cbor_utils::{run_decoder_full, run_encoder};
+use crate::journal::{FullJournal, JournalID};
+use crate::operation::*;
+use crate::utils::EMPTYSIGNATURE;
 
 pub const FORMAT_ENTRY_VERSION: u32 = 0;
 
@@ -139,7 +139,8 @@ impl JournalEntry {
             return Err(MIDecodeError::UnsupportedEntryVersion {
                 found_version: format_version,
                 max_supported_version: FORMAT_ENTRY_VERSION,
-            }.into());
+            }
+            .into());
         }
 
         let n = d.object()?;
@@ -151,7 +152,7 @@ impl JournalEntry {
         let mut issuer = None;
         let mut signature = None;
 
-        use cbor_utils::*;
+        use crate::cbor_utils::*;
         for _ in 0..n {
             let i = d.u8()?;
             let key = Key::u64(u64::from(i));
@@ -255,7 +256,8 @@ impl EntryExtension {
                     e.bytes(&self.permanent_subject_publickeys[i][..])?;
                 }
                 Ok(())
-            }).unwrap(),
+            })
+            .unwrap(),
         )
     }
 

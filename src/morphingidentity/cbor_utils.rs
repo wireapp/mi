@@ -1,9 +1,9 @@
 extern crate cbor;
+use crate::journal::JournalID;
 use cbor::decoder::{DecodeError, DecodeResult, Decoder};
 use cbor::encoder::{EncodeError, EncodeResult, Encoder};
 use cbor::value::Key;
 use cbor::Config;
-use journal::JournalID;
 use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::crypto::sign::{
     PublicKey, Signature, PUBLICKEYBYTES, SIGNATUREBYTES,
@@ -182,7 +182,8 @@ pub fn check_array_length(
             type_name,
             expected_length,
             actual_length,
-        }.into())
+        }
+        .into())
     } else {
         Ok(())
     }
@@ -199,7 +200,8 @@ pub fn decode_journal_id<R: Read>(
             type_name: "JournalID",
             expected_length: 16,
             actual_length: b.len(),
-        }.into()
+        }
+        .into()
     })
 }
 
@@ -212,7 +214,8 @@ pub fn decode_publickey<R: Read>(
             type_name: "PublicKey",
             expected_length: PUBLICKEYBYTES,
             actual_length: b.len(),
-        }.into()
+        }
+        .into()
     })
 }
 
@@ -225,7 +228,8 @@ pub fn decode_signature<R: Read>(
             type_name: "Signature",
             expected_length: SIGNATUREBYTES,
             actual_length: b.len(),
-        }.into()
+        }
+        .into()
     })
 }
 
@@ -238,7 +242,8 @@ pub fn decode_hash<R: Read>(
             type_name: "sha256::Digest",
             expected_length: sha256::DIGESTBYTES,
             actual_length: b.len(),
-        }.into()
+        }
+        .into()
     })
 }
 
@@ -252,7 +257,8 @@ macro_rules! to_field {
                 return Err(MIDecodeError::MissingField {
                     field_name: $field,
                     field_key: $key,
-                }.into())
+                }
+                .into())
             }
         }
     };
@@ -264,7 +270,8 @@ macro_rules! uniq {
             return Err(MIDecodeError::DuplicateField {
                 field_name: $field,
                 field_key: $key,
-            }.into());
+            }
+            .into());
         } else {
             $var = Some($decode_action)
         }

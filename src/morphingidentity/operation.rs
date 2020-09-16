@@ -1,4 +1,4 @@
-use capabilities::*;
+use crate::capabilities::*;
 use cbor::{DecodeResult, Decoder, EncodeResult, Encoder};
 use sodiumoxide::crypto::sign::*;
 use std::io::{Read, Write};
@@ -151,7 +151,7 @@ impl Operation {
     }
 
     pub fn decode<R: Read>(d: &mut Decoder<R>) -> DecodeResult<Operation> {
-        use cbor_utils::*;
+        use crate::cbor_utils::*;
         let len = d.array()?;
         let tag = d.u32()?;
         match tag {
@@ -204,7 +204,8 @@ impl Operation {
             _ => Err(MIDecodeError::UnknownOperation {
                 found_tag: tag,
                 max_known_tag: OPERATIONS - 1,
-            }.into()),
+            }
+            .into()),
         }
     }
 }
