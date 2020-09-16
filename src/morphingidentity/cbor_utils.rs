@@ -20,7 +20,7 @@ pub type DecoderVec = Decoder<Cursor<Vec<u8>>>;
 /// `run_encoder` creates a new encoder, passes it to `enc` and then
 /// converts the result to a `Vec<u8>`.
 pub fn run_encoder(
-    enc: &Fn(&mut EncoderVec) -> EncodeResult,
+    enc: &dyn Fn(&mut EncoderVec) -> EncodeResult,
 ) -> Result<Vec<u8>, EncodeError> {
     let mut e = Encoder::new(Cursor::new(Vec::new()));
     enc(&mut e).and(Ok(e.into_writer().into_inner()))
@@ -29,7 +29,7 @@ pub fn run_encoder(
 /// Run a CBOR decoder on a bytestring.
 pub fn run_decoder<T>(
     bytes: Vec<u8>,
-    dec: &Fn(&mut DecoderVec) -> DecodeResult<T>,
+    dec: &dyn Fn(&mut DecoderVec) -> DecodeResult<T>,
 ) -> DecodeResult<T> {
     dec(&mut Decoder::new(Config::default(), Cursor::new(bytes)))
 }
@@ -38,7 +38,7 @@ pub fn run_decoder<T>(
 /// has been consumed.
 pub fn run_decoder_full<T>(
     bytes: Vec<u8>,
-    dec: &Fn(&mut DecoderVec) -> DecodeResult<T>,
+    dec: &dyn Fn(&mut DecoderVec) -> DecodeResult<T>,
 ) -> DecodeResult<T> {
     let len = bytes.len();
     let mut d = Decoder::new(Config::default(), Cursor::new(bytes));
