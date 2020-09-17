@@ -1,7 +1,7 @@
 pub use sodiumoxide::randombytes::randombytes;
 
-use capabilities;
-use journal;
+use crate::capabilities;
+use crate::journal;
 use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::crypto::sign;
 use uuid;
@@ -87,7 +87,8 @@ impl GoodRand for sign::PublicKey {
     fn rand() -> sign::PublicKey {
         sign::PublicKey::from_slice(
             randombytes(sign::PUBLICKEYBYTES).as_slice(),
-        ).unwrap()
+        )
+        .unwrap()
     }
 }
 
@@ -95,7 +96,8 @@ impl GoodRand for sign::Signature {
     fn rand() -> sign::Signature {
         sign::Signature::from_slice(
             randombytes(sign::SIGNATUREBYTES).as_slice(),
-        ).unwrap()
+        )
+        .unwrap()
     }
 }
 
@@ -103,7 +105,8 @@ impl GoodRand for sha256::Digest {
     fn rand() -> sha256::Digest {
         sha256::Digest::from_slice(
             randombytes(sha256::DIGESTBYTES).as_slice(),
-        ).unwrap()
+        )
+        .unwrap()
     }
 }
 

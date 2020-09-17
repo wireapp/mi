@@ -1,9 +1,9 @@
 extern crate cbor;
+use crate::journal::JournalID;
 use cbor::decoder::{DecodeError, DecodeResult, Decoder};
 use cbor::encoder::{EncodeError, EncodeResult, Encoder};
 use cbor::value::Key;
 use cbor::Config;
-use journal::JournalID;
 use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::crypto::sign::{
     PublicKey, Signature, PUBLICKEYBYTES, SIGNATUREBYTES,
@@ -20,7 +20,7 @@ pub type DecoderVec = Decoder<Cursor<Vec<u8>>>;
 /// `run_encoder` creates a new encoder, passes it to `enc` and then
 /// converts the result to a `Vec<u8>`.
 pub fn run_encoder(
-    enc: &Fn(&mut EncoderVec) -> EncodeResult,
+    enc: &dyn Fn(&mut EncoderVec) -> EncodeResult,
 ) -> Result<Vec<u8>, EncodeError> {
     let mut e = Encoder::new(Cursor::new(Vec::new()));
     enc(&mut e).and(Ok(e.into_writer().into_inner()))
@@ -29,7 +29,7 @@ pub fn run_encoder(
 /// Run a CBOR decoder on a bytestring.
 pub fn run_decoder<T>(
     bytes: Vec<u8>,
-    dec: &Fn(&mut DecoderVec) -> DecodeResult<T>,
+    dec: &dyn Fn(&mut DecoderVec) -> DecodeResult<T>,
 ) -> DecodeResult<T> {
     dec(&mut Decoder::new(Config::default(), Cursor::new(bytes)))
 }
@@ -38,7 +38,7 @@ pub fn run_decoder<T>(
 /// has been consumed.
 pub fn run_decoder_full<T>(
     bytes: Vec<u8>,
-    dec: &Fn(&mut DecoderVec) -> DecodeResult<T>,
+    dec: &dyn Fn(&mut DecoderVec) -> DecodeResult<T>,
 ) -> DecodeResult<T> {
     let len = bytes.len();
     let mut d = Decoder::new(Config::default(), Cursor::new(bytes));
@@ -182,7 +182,8 @@ pub fn check_array_length(
             type_name,
             expected_length,
             actual_length,
-        }.into())
+        }
+        .into())
     } else {
         Ok(())
     }
@@ -199,7 +200,8 @@ pub fn decode_journal_id<R: Read>(
             type_name: "JournalID",
             expected_length: 16,
             actual_length: b.len(),
-        }.into()
+        }
+        .into()
     })
 }
 
@@ -212,7 +214,8 @@ pub fn decode_publickey<R: Read>(
             type_name: "PublicKey",
             expected_length: PUBLICKEYBYTES,
             actual_length: b.len(),
-        }.into()
+        }
+        .into()
     })
 }
 
@@ -225,7 +228,8 @@ pub fn decode_signature<R: Read>(
             type_name: "Signature",
             expected_length: SIGNATUREBYTES,
             actual_length: b.len(),
-        }.into()
+        }
+        .into()
     })
 }
 
@@ -238,7 +242,8 @@ pub fn decode_hash<R: Read>(
             type_name: "sha256::Digest",
             expected_length: sha256::DIGESTBYTES,
             actual_length: b.len(),
-        }.into()
+        }
+        .into()
     })
 }
 
@@ -252,7 +257,8 @@ macro_rules! to_field {
                 return Err(MIDecodeError::MissingField {
                     field_name: $field,
                     field_key: $key,
-                }.into())
+                }
+                .into())
             }
         }
     };
@@ -264,7 +270,8 @@ macro_rules! uniq {
             return Err(MIDecodeError::DuplicateField {
                 field_name: $field,
                 field_key: $key,
-            }.into());
+            }
+            .into());
         } else {
             $var = Some($decode_action)
         }

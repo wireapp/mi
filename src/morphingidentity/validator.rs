@@ -1,7 +1,7 @@
-use capabilities::*;
-use entries::JournalEntry;
-use journal::*;
-use operation::*;
+use crate::capabilities::*;
+use crate::entries::JournalEntry;
+use crate::journal::*;
+use crate::operation::*;
 use sodiumoxide::crypto::hash::sha256::Digest;
 use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashSet;
@@ -27,10 +27,13 @@ pub trait ValidateEntry {
     fn trusted_devices_count(&self) -> u32;
 
     /// Check if given device is in the set of trusted devices
-    fn is_device_trusted(&self, &PublicKey) -> bool;
+    fn is_device_trusted(&self, pubkey: &PublicKey) -> bool;
 
     /// Capabilities of given device
-    fn device_capabilities(&self, &PublicKey) -> Option<Capabilities>;
+    fn device_capabilities(
+        &self,
+        pubkey: &PublicKey,
+    ) -> Option<Capabilities>;
 }
 
 /// Use methods of `Validator` to validate entries.
@@ -167,7 +170,9 @@ impl Validator {
                     Some(cap) => {
                         if cap.cannot_be_removed() {
                             // Subject needs to be removable
-                            return Err(ValidatorError::SubjectNotRemovable);
+                            return Err(
+                                ValidatorError::SubjectNotRemovable,
+                            );
                         }
                     }
                     None => {
@@ -212,7 +217,9 @@ impl Validator {
                 match journal.device_capabilities(&removed_subject) {
                     Some(cap) => {
                         if cap.cannot_be_removed() {
-                            return Err(ValidatorError::SubjectNotRemovable);
+                            return Err(
+                                ValidatorError::SubjectNotRemovable,
+                            );
                         }
                     }
                     None => {

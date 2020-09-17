@@ -1,4 +1,4 @@
-use journal::{FullJournal, JournalID, UserID};
+use crate::journal::{FullJournal, JournalID, UserID};
 use std::collections::HashMap;
 
 #[derive(Default)]

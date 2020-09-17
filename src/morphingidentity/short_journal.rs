@@ -1,11 +1,11 @@
-use capabilities::*;
-use entries::JournalEntry;
-use journal::*;
-use operation::Operation;
+use crate::capabilities::*;
+use crate::entries::JournalEntry;
+use crate::journal::*;
+use crate::operation::Operation;
+use crate::validator::{ValidateEntry, Validator};
 use sodiumoxide::crypto::hash::sha256::Digest;
 use sodiumoxide::crypto::sign::ed25519::PublicKey;
 use std::collections::HashMap;
-use validator::{ValidateEntry, Validator};
 
 /// A short journal is what you arrive at when you process a journal. You
 /// can validate an entry against a short journal, but you can't check that

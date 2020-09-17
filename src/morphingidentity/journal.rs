@@ -1,15 +1,15 @@
-use capabilities::*;
-use cbor::{DecodeError, DecodeResult};
-use cbor_utils::{
+use crate::capabilities::*;
+use crate::cbor_utils::{
     ensure_array_length, run_decoder_full, run_encoder, MIDecodeError,
 };
-use entries::{DeviceInfo, JournalEntry};
-use operation::Operation;
+use crate::entries::{DeviceInfo, JournalEntry};
+use crate::operation::Operation;
+use crate::validator::{ValidateEntry, Validator, ValidatorError};
+use cbor::{DecodeError, DecodeResult};
 use sodiumoxide::crypto::hash::sha256::{hash, Digest};
 use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 use std::collections::HashMap;
 use uuid::{ParseError, Uuid};
-use validator::{ValidateEntry, Validator, ValidatorError};
 
 pub const FORMAT_JOURNAL_VERSION: u32 = 0;
 pub const MAX_DEVICES: u32 = 8;
@@ -232,7 +232,8 @@ impl FullJournal {
                 self.entries[i].encode(&mut e)?;
             }
             Ok(())
-        }).unwrap()
+        })
+        .unwrap()
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> DecodeResult<FullJournal> {
@@ -243,7 +244,8 @@ impl FullJournal {
                 return Err(MIDecodeError::UnsupportedJournalVersion {
                     found_version: version,
                     max_supported_version: FORMAT_JOURNAL_VERSION,
-                }.into());
+                }
+                .into());
             }
             let num = d.array()?;
             if num < 1 {
@@ -254,7 +256,9 @@ impl FullJournal {
             let mut journal = match FullJournal::new_from_entry(first_entry)
             {
                 Ok(j) => j,
-                Err(err) => return Err(DecodeError::Other(From::from(err))),
+                Err(err) => {
+                    return Err(DecodeError::Other(From::from(err)))
+                }
             };
 
             if num > 1 {
