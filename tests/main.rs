@@ -215,7 +215,8 @@ fn fuzz_testing() {
         &pub_keys[0],
         &sec_keys[0],
         devices,
-    ).unwrap();
+    )
+    .unwrap();
 
     for _ in 0..ITER - 1 {
         let trusted = random_journal.get_trusted_devices().clone();
@@ -227,7 +228,7 @@ fn fuzz_testing() {
         // This generates an (almost) random entry and tries to add it to the journal.
         loop {
             // Pick a trusted issuer.
-            let mut c = randomnumber(trusted.len() as u64) as usize;
+            let c = randomnumber(trusted.len() as u64) as usize;
             counter = 0;
             for e in trusted.values() {
                 if counter == c {
@@ -293,16 +294,12 @@ fn fuzz_testing() {
                                 new_entry.operation.set_subject_signature(
                                     subject_signature,
                                 );
-                                assert!(
-                                    random_journal
-                                        .can_add_entry(&new_entry)
-                                        .is_ok()
-                                );
-                                assert!(
-                                    random_journal
-                                        .add_entry(new_entry)
-                                        .is_ok()
-                                );
+                                assert!(random_journal
+                                    .can_add_entry(&new_entry)
+                                    .is_ok());
+                                assert!(random_journal
+                                    .add_entry(new_entry)
+                                    .is_ok());
                                 counter += 1;
                                 break;
                             }
@@ -336,16 +333,12 @@ fn fuzz_testing() {
                                 }
                             }
                             Ok(new_entry) => {
-                                assert!(
-                                    random_journal
-                                        .can_add_entry(&new_entry)
-                                        .is_ok()
-                                );
-                                assert!(
-                                    random_journal
-                                        .add_entry(new_entry)
-                                        .is_ok()
-                                );
+                                assert!(random_journal
+                                    .can_add_entry(&new_entry)
+                                    .is_ok());
+                                assert!(random_journal
+                                    .add_entry(new_entry)
+                                    .is_ok());
                                 counter += 1;
                                 break;
                             }
@@ -396,16 +389,12 @@ fn fuzz_testing() {
                                 new_entry.operation.set_subject_signature(
                                     added_subject_signature,
                                 );
-                                assert!(
-                                    random_journal
-                                        .can_add_entry(&new_entry)
-                                        .is_ok()
-                                );
-                                assert!(
-                                    random_journal
-                                        .add_entry(new_entry)
-                                        .is_ok()
-                                );
+                                assert!(random_journal
+                                    .can_add_entry(&new_entry)
+                                    .is_ok());
+                                assert!(random_journal
+                                    .add_entry(new_entry)
+                                    .is_ok());
                                 counter += 1;
                                 break;
                             }
@@ -448,16 +437,12 @@ fn fuzz_testing() {
                                 new_entry.operation.set_subject_signature(
                                     added_subject_signature,
                                 );
-                                assert!(
-                                    random_journal
-                                        .can_add_entry(&new_entry)
-                                        .is_ok()
-                                );
-                                assert!(
-                                    random_journal
-                                        .add_entry(new_entry)
-                                        .is_ok()
-                                );
+                                assert!(random_journal
+                                    .can_add_entry(&new_entry)
+                                    .is_ok());
+                                assert!(random_journal
+                                    .add_entry(new_entry)
+                                    .is_ok());
                                 counter += 1;
                                 break;
                             }

@@ -283,9 +283,9 @@ impl EntryExtension {
 mod tests {
     use super::*;
 
+    use crate::cbor_utils::MIDecodeError;
+    use crate::rand_utils::{randombytes, randomnumber, GoodRand};
     use cbor::DecodeError;
-    use cbor_utils::MIDecodeError;
-    use rand_utils::{randombytes, randomnumber, GoodRand};
     use sodiumoxide;
 
     /// Produce a random `Operation`.
